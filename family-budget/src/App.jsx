@@ -1,5 +1,4 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import * as XLSX from "xlsx";
 import { AreaChart, Area, PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
@@ -298,19 +297,29 @@ ${content.slice(0, 8000)}`}]
     } finally { setParsing(false); }
   };
 
+  const loadXLSX = () => new Promise((res, rej) => {
+    if (window.XLSX) return res(window.XLSX);
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    s.onload = () => res(window.XLSX);
+    s.onerror = rej;
+    document.head.appendChild(s);
+  });
+
   const handleCSV = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     setParsing(true); setParseError("");
     try {
+      const XLSXLib = await loadXLSX();
       const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type:"array", cellDates:true });
+      const wb = XLSXLib.read(buf, { type:"array", cellDates:true });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const csv = XLSX.utils.sheet_to_csv(ws);
+      const csv = XLSXLib.utils.sheet_to_csv(ws);
       setRawText(csv);
       parseWithAI(csv);
     } catch(err) {
-      setParseError("파일을 읽지 못했어요. 다시 시도해보세요.");
+      setParseError(`파일 읽기 오류: ${err.message}`);
       setParsing(false);
     }
   };
