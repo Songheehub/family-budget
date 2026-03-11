@@ -222,6 +222,27 @@ function AssetEditModal({ assetCats: initCats, onSave, onClose }) {
   );
 }
 
+// ── 카드 추가 폼 ──
+function CardAddForm({ members, onAdd }) {
+  const [name, setName] = useState("");
+  const [memberId, setMemberId] = useState("");
+  const submit = () => {
+    if (!name.trim()) return;
+    onAdd({ name: name.trim(), memberId: memberId ? parseInt(memberId) : null });
+    setName(""); setMemberId("");
+  };
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      <input className="inp" placeholder="카드 이름 (예: 신한카드)" value={name} onChange={e=>setName(e.target.value)}/>
+      <select className="sel" value={memberId} onChange={e=>setMemberId(e.target.value)}>
+        <option value="">카드 주인 선택</option>
+        {members.map(m=><option key={m.id} value={m.id}>{m.emoji} {m.name}</option>)}
+      </select>
+      <button className="btn-b" onClick={submit} style={{width:"100%"}}>+ 추가</button>
+    </div>
+  );
+}
+
 // ────────────────────────────────────────────
 // 메인 앱
 // ────────────────────────────────────────────
@@ -232,16 +253,19 @@ export default function App() {
   const [showTxModal, setShowTxModal] = useState(false);
   const [showAssetModal, setShowAssetModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showCardModal, setShowCardModal] = useState(false);
+  const [showSettleModal, setShowSettleModal] = useState(null);
+  const [settleAccountId, setSettleAccountId] = useState("");
   const [selectedMember, setSelectedMember] = useState(null);
   const [expandedCat, setExpandedCat] = useState({});
-  const [chartView, setChartView] = useState("category"); // "category" | "account"
-  const [chartPeriod, setChartPeriod] = useState("monthly"); // "daily" | "monthly" | "yearly"
-  const [chartFocusCat, setChartFocusCat] = useState(null); // null = 전체, catId = 해당 카테고리 통장들
+  const [chartView, setChartView] = useState("category");
+  const [chartPeriod, setChartPeriod] = useState("monthly");
+  const [chartFocusCat, setChartFocusCat] = useState(null);
   const [showRecurringModal, setShowRecurringModal] = useState(false);
   const [recurringItems, setRecurringItems] = useState([]);
   const [recurringApplied, setRecurringApplied] = useState(false);
   const [rForm, setRForm] = useState({memo:"",amount:"",category:"식비",type:"expense",day:1,member:"",accountId:"",toAccountId:""});
-  const [txForm, setTxForm] = useState({date:now.toISOString().slice(0,10),type:"expense",amount:"",category:"식비",memo:"",member:"",accountId:""});
+  const [txForm, setTxForm] = useState({date:now.toISOString().slice(0,10),type:"expense",amount:"",category:"식비",memo:"",member:"",accountId:"",cardId:""});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
@@ -382,7 +406,40 @@ export default function App() {
   const assetCats    = setup?.assetCats    || [];
   const assetHistory = setup?.assetHistory || [];
   const accountHistory = setup?.accountHistory || [];
+  const cards        = setup?.cards        || [];
   const totalAssetValue = allTotal(assetCats);
+
+  // 카드별 미정산 누적금액
+  const cardBalances = useMemo(() => {
+    const map = {};
+    cards.forEach(c => { map[String(c.id)] = 0; });
+    transactions.filter(t => t.cardId && !t.isCardSettle).forEach(t => {
+      const k = String(t.cardId);
+      if (map[k] !== undefined) map[k] += t.amount;
+    });
+    return map;
+  }, [transactions, cards]);
+
+  // 카드 정산
+  const settleCard = () => {
+    const card = showSettleModal;
+    if (!card || !settleAccountId) return;
+    const amt = cardBalances[String(card.id)] || 0;
+    if (!amt) return;
+    const settleDate = now.toISOString().slice(0,10);
+    // 정산 내역 (지출로 통장에서 차감)
+    const settleTx = { id: Date.now(), date: settleDate, type:"expense", amount: amt,
+      category:"기타", memo:`${card.name} 카드 정산`, member: card.memberId||9999,
+      accountId: settleAccountId, isCardSettle: true, cardId: card.id };
+    setTransactions(prev => [...prev, settleTx]);
+    setSetup(s => {
+      const newCats = adjustAccount(s.assetCats, settleAccountId, -amt);
+      const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
+      return { ...s, assetCats: newCats, assetHistory, accountHistory };
+    });
+    setShowSettleModal(null);
+    setSettleAccountId("");
+  };
 
   const monthTx      = useMemo(()=>transactions.filter(t=>t.date.startsWith(thisMonth)),[transactions]);
   const totalIncome  = useMemo(()=>monthTx.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0),[monthTx]);
@@ -485,7 +542,8 @@ export default function App() {
     const amt = parseInt(txForm.amount);
     const tx = { id: Date.now(), ...txForm, amount: amt, member: parseInt(txForm.member) };
     setTransactions(prev => [...prev, tx]);
-    if (txForm.accountId) {
+    // 카드 결제면 통장 잔액 변동 없음
+    if (txForm.accountId && !txForm.cardId) {
       const delta = txForm.type === "income" ? amt : -amt;
       setSetup(s => {
         const newCats = adjustAccount(s.assetCats, txForm.accountId, delta);
@@ -494,13 +552,14 @@ export default function App() {
       });
     }
     setShowTxModal(false);
-    setTxForm(f => ({ ...f, amount: "", memo: "", accountId: "" }));
+    setTxForm(f => ({ ...f, amount: "", memo: "", accountId: "", cardId: "" }));
   };
 
   const deleteTx = (tx) => {
     if (tx.isTransfer) { deleteTransfer(tx); return; }
     setTransactions(prev => prev.filter(x => x.id !== tx.id));
-    if (tx.accountId) {
+    // 카드결제 내역이면 통장 잔액 복원 불필요
+    if (tx.accountId && !tx.cardId) {
       const delta = tx.type === "income" ? -tx.amount : tx.amount;
       setSetup(s => {
         const newCats = adjustAccount(s.assetCats, tx.accountId, delta);
@@ -712,6 +771,36 @@ export default function App() {
               );
             })}
 
+            {/* ── 카드 섹션 ── */}
+            {cards.length > 0 && (
+              <div className="card" style={{padding:0,overflow:"hidden"}}>
+                <div style={{padding:"14px 18px 10px",borderBottom:"1px solid #F5F0E8"}}>
+                  <div style={{fontSize:14,fontWeight:700}}>💳 카드 미정산 잔액</div>
+                </div>
+                {cards.map(card => {
+                  const bal = cardBalances[String(card.id)] || 0;
+                  const mem = members.find(m=>m.id===card.memberId);
+                  return (
+                    <div key={card.id} style={{display:"flex",alignItems:"center",gap:12,padding:"13px 18px",borderBottom:"1px solid #F5F0E8"}}>
+                      <div style={{width:38,height:38,borderRadius:11,background:"#FFF0EE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>💳</div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:14,fontWeight:500}}>{card.name}</div>
+                        <div style={{fontSize:11,color:"#aaa",marginTop:2}}>{mem?`${mem.emoji} ${mem.name}`:""}</div>
+                      </div>
+                      <div style={{textAlign:"right",marginRight:8}}>
+                        <div style={{fontSize:15,fontWeight:700,color:bal>0?"#E07A5F":"#aaa"}}>{fmtShort(bal)}</div>
+                        <div style={{fontSize:11,color:"#bbb",marginTop:2}}>미정산</div>
+                      </div>
+                      <button onClick={()=>{setShowSettleModal(card);setSettleAccountId("");}}
+                        disabled={bal===0}
+                        style={{background:bal>0?"#E07A5F":"#eee",border:"none",borderRadius:9,padding:"8px 13px",color:bal>0?"white":"#bbb",fontSize:12,fontWeight:600,cursor:bal>0?"pointer":"default",flexShrink:0}}>
+                        정산
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {/* ── 자산 추이 차트 ── */}
             {(assetHistory.length>0 || accountHistory.length>0) && assetCats.length>0 && (()=>{
               const allAccounts = assetCats.flatMap(c=>c.accounts.map(a=>({...a,catLabel:c.label,catColor:c.color,catId:c.id})));
@@ -867,7 +956,9 @@ export default function App() {
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:14,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.memo}</div>
                       <div style={{fontSize:11,color:"#aaa",marginTop:2}}>
-                        {t.date} · {isTransfer ? `${fromAcc?.name||"?"} → ${toAcc?.name||"?"}` : `${t.category} · ${mem?.emoji}${mem?.name}${t.accountId?` · 💳 ${allAccounts.find(a=>String(a.id)===String(t.accountId))?.name||""}`:""}` }
+                        {t.date} · {isTransfer
+                          ? `${fromAcc?.name||"?"} → ${toAcc?.name||"?"}`
+                          : `${t.category} · ${mem?.emoji}${mem?.name}${t.cardId ? ` · 💳 ${cards.find(c=>String(c.id)===String(t.cardId))?.name||"카드"}` : t.accountId?` · 💳 ${allAccounts.find(a=>String(a.id)===String(t.accountId))?.name||""}`:""}${t.isCardSettle?" · 카드 정산":""}`}
                       </div>
                     </div>
                     <div style={{fontSize:14,fontWeight:700,color:isTransfer?"#4A6FA5":t.type==="income"?"#3BB273":"#E07A5F",whiteSpace:"nowrap",marginRight:5}}>
@@ -902,13 +993,27 @@ export default function App() {
                   <div style={{fontSize:13,marginBottom:6}}>고정지출 항목이 없어요</div>
                   <div style={{fontSize:12}}>월세, 보험료, 구독료 등을 등록해보세요</div>
                 </div>
-              ) : recurringItems.map(r => {
+              ) : recurringItems.map((r, idx) => {
                 const cat = CATEGORIES[r.category];
                 const acc = assetCats.flatMap(c=>c.accounts).find(a=>String(a.id)===String(r.accountId));
                 const toAcc = r.type==="transfer" ? assetCats.flatMap(c=>c.accounts).find(a=>String(a.id)===String(r.toAccountId)) : null;
                 const isTransfer = r.type === "transfer";
+                const moveUp = () => {
+                  if (idx===0) return;
+                  setRecurringItems(prev => { const a=[...prev]; [a[idx-1],a[idx]]=[a[idx],a[idx-1]]; return a; });
+                };
+                const moveDown = () => {
+                  setRecurringItems(prev => { if(idx>=prev.length-1) return prev; const a=[...prev]; [a[idx],a[idx+1]]=[a[idx+1],a[idx]]; return a; });
+                };
                 return (
                   <div key={r.id} style={{display:"flex",alignItems:"center",gap:11,padding:"13px 18px",borderBottom:"1px solid #F5F0E8",opacity:r.active===false?0.45:1}}>
+                    {/* 순서 버튼 */}
+                    <div style={{display:"flex",flexDirection:"column",gap:2,flexShrink:0}}>
+                      <button onClick={moveUp} disabled={idx===0}
+                        style={{background:"none",border:"none",color:idx===0?"#e0e0e0":"#bbb",fontSize:13,cursor:idx===0?"default":"pointer",padding:"1px 4px",lineHeight:1}}>▲</button>
+                      <button onClick={moveDown} disabled={idx===recurringItems.length-1}
+                        style={{background:"none",border:"none",color:idx===recurringItems.length-1?"#e0e0e0":"#bbb",fontSize:13,cursor:idx===recurringItems.length-1?"default":"pointer",padding:"1px 4px",lineHeight:1}}>▼</button>
+                    </div>
                     <div style={{width:38,height:38,borderRadius:11,background:isTransfer?"#EEF2F9":cat?.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:19,flexShrink:0}}>
                       {isTransfer?"🔄":cat?.emoji||"📦"}
                     </div>
@@ -1046,27 +1151,65 @@ export default function App() {
             </div>
             <div style={{marginBottom:11}}>
               <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>
-                {txForm.type==="income" ? "💳 입금 통장 (선택)" : "💳 출금 통장 (선택)"}
+                {txForm.type==="income" ? "💳 입금 통장 (선택)" : "💳 결제 수단 (선택)"}
               </label>
-              <select className="sel" value={txForm.accountId} onChange={e=>setTxForm({...txForm,accountId:e.target.value})}>
-                <option value="">연결 안 함</option>
-                {assetCats.map(cat =>
-                  cat.accounts.map(acc => (
+              {txForm.type==="expense" && cards.length>0 && (
+                <div className="tt" style={{marginBottom:7}}>
+                  <button className={`tb ${!txForm.cardId?"on":""}`} onClick={()=>setTxForm({...txForm,cardId:""})} style={{color:!txForm.cardId?"#4A6FA5":"#999",fontSize:12}}>🏦 통장</button>
+                  <button className={`tb ${txForm.cardId?"on":""}`} onClick={()=>setTxForm({...txForm,accountId:"",cardId:String(cards[0]?.id||"")})} style={{color:txForm.cardId?"#E07A5F":"#999",fontSize:12}}>💳 카드</button>
+                </div>
+              )}
+              {txForm.cardId ? (
+                <select className="sel" value={txForm.cardId} onChange={e=>setTxForm({...txForm,cardId:e.target.value,accountId:""})}>
+                  {cards.map(c=>{const mem=members.find(m=>m.id===c.memberId); return <option key={c.id} value={c.id}>{c.name}{mem?` (${mem.name})`:""}</option>;})}
+                </select>
+              ) : (
+                <select className="sel" value={txForm.accountId} onChange={e=>setTxForm({...txForm,accountId:e.target.value})}>
+                  <option value="">연결 안 함</option>
+                  {assetCats.map(cat=>cat.accounts.map(acc=>(
                     <option key={acc.id} value={acc.id}>{cat.emoji} {cat.label} › {acc.name} ({fmtShort(acc.amount)})</option>
-                  ))
-                )}
-              </select>
-              {txForm.accountId && (
-                <div style={{fontSize:11,color: txForm.type==="income"?"#3BB273":"#E07A5F",marginTop:5,paddingLeft:4}}>
+                  )))}
+                </select>
+              )}
+              {txForm.accountId && !txForm.cardId && (
+                <div style={{fontSize:11,color:txForm.type==="income"?"#3BB273":"#E07A5F",marginTop:5,paddingLeft:4}}>
                   {txForm.type==="income" ? "▲ 저장 시 잔액이 늘어납니다" : "▼ 저장 시 잔액이 줄어듭니다"}
                 </div>
               )}
+              {txForm.cardId && <div style={{fontSize:11,color:"#FF9F1C",marginTop:5,paddingLeft:4}}>💳 카드값으로 누적돼요 (정산 전까지 통장 잔액 변동 없음)</div>}
             </div>
             <div style={{marginBottom:20}}><label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>메모</label>
               <input className="inp" placeholder="내역을 입력하세요" value={txForm.memo} onChange={e=>setTxForm({...txForm,memo:e.target.value})}/></div>
             <div style={{display:"flex",gap:10}}>
               <button className="btn-g" style={{flex:1}} onClick={()=>setShowTxModal(false)}>취소</button>
               <button className="btn-b" style={{flex:2}} onClick={addTx}>추가하기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 카드 정산 모달 ── */}
+      {showSettleModal && (
+        <div className="overlay" onClick={()=>setShowSettleModal(null)}>
+          <div className="sheet" onClick={e=>e.stopPropagation()}>
+            <div style={{width:36,height:4,background:"#E5E0D5",borderRadius:4,margin:"0 auto 20px"}}/>
+            <div style={{fontSize:17,fontWeight:700,marginBottom:6}}>💳 카드 정산</div>
+            <div style={{fontSize:13,color:"#666",marginBottom:18}}>{showSettleModal.name} 미정산 잔액</div>
+            <div style={{fontSize:32,fontWeight:700,color:"#E07A5F",textAlign:"center",marginBottom:20}}>
+              {fmt(cardBalances[String(showSettleModal.id)]||0)}
+            </div>
+            <div style={{marginBottom:14}}>
+              <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:6}}>출금 통장 선택</label>
+              <select className="sel" value={settleAccountId} onChange={e=>setSettleAccountId(e.target.value)}>
+                <option value="">통장을 선택하세요</option>
+                {assetCats.map(cat=>cat.accounts.map(acc=>(
+                  <option key={acc.id} value={acc.id}>{cat.emoji} {cat.label} › {acc.name} ({fmtShort(acc.amount)})</option>
+                )))}
+              </select>
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button className="btn-g" style={{flex:1}} onClick={()=>setShowSettleModal(null)}>취소</button>
+              <button className="btn-b" style={{flex:2,background:"#E07A5F"}} onClick={settleCard} disabled={!settleAccountId}>정산하기</button>
             </div>
           </div>
         </div>
@@ -1243,6 +1386,27 @@ export default function App() {
                 </div>
               ))}
             </div>
+
+            {/* 카드 관리 */}
+            <div style={{marginBottom:20}}>
+              <div style={{fontSize:13,fontWeight:600,color:"#555",marginBottom:10}}>💳 카드 관리</div>
+              {cards.map((card, idx) => {
+                const mem = members.find(m => m.id === card.memberId);
+                return (
+                  <div key={card.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 13px",background:"#FAFAF7",borderRadius:10,marginBottom:7}}>
+                    <span style={{fontSize:18}}>💳</span>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:500}}>{card.name}</div>
+                      {mem && <div style={{fontSize:11,color:"#aaa"}}>{mem.emoji} {mem.name}</div>}
+                    </div>
+                    <button onClick={()=>setSetup(s=>({...s, cards:(s.cards||[]).filter((_,i)=>i!==idx)}))}
+                      style={{background:"#FFF0EE",border:"none",borderRadius:8,padding:"5px 10px",color:"#E07A5F",fontSize:12,cursor:"pointer"}}>삭제</button>
+                  </div>
+                );
+              })}
+              <CardAddForm members={members} onAdd={card=>setSetup(s=>({...s, cards:[...(s.cards||[]), {...card, id:Date.now()}]}))}/>
+            </div>
+
             <button onClick={()=>{if(window.confirm("모든 데이터를 초기화할까요?")){
               fbDelete("setup").catch(()=>{});
               fbDelete("transactions").catch(()=>{});
