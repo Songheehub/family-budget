@@ -297,6 +297,20 @@ ${content.slice(0, 8000)}`}]
     } finally { setParsing(false); }
   };
 
+  // CSV 한 줄을 컬럼 배열로 파싱 (따옴표 안의 콤마 처리)
+  const splitCSVLine = (line) => {
+    const cols = [];
+    let cur = "", inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === ',' && !inQ) { cols.push(cur.trim()); cur = ""; }
+      else { cur += ch; }
+    }
+    cols.push(cur.trim());
+    return cols;
+  };
+
   // 순수 JS로 CSV 파싱 (AI 없이)
   const parseCSV = (text) => {
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
@@ -309,47 +323,47 @@ ${content.slice(0, 8000)}`}]
     );
     if (headerIdx === -1) return [];
 
-    const headers = lines[headerIdx].split(",").map(h => h.replace(/"/g,"").trim());
+    const headers = splitCSVLine(lines[headerIdx]).map(h => h.replace(/"/g,"").trim());
 
     // 컬럼 인덱스 찾기
-    const dateCol   = headers.findIndex(h => /날짜|이용일|승인일|거래일|결제일/.test(h));
-    const amtCol    = headers.findIndex(h => /이용금액|승인금액|거래금액|결제금액|금액/.test(h));
-    const memoCol   = headers.findIndex(h => /가맹점|상호|이용처|내용|거래처|업종명/.test(h));
+    const dateCol = headers.findIndex(h => /날짜|이용일|승인일|거래일|결제일/.test(h));
+    const amtCol  = headers.findIndex(h => /이용금액|승인금액|거래금액|결제금액|금액/.test(h));
+    const memoCol = headers.findIndex(h => /가맹점|상호|이용처|내용|거래처|업종명/.test(h));
 
     if (dateCol === -1 || amtCol === -1) return [];
 
     const results = [];
     for (let i = headerIdx + 1; i < lines.length; i++) {
-      const cols = lines[i].split(",").map(c => c.replace(/"/g,"").trim());
+      const cols = splitCSVLine(lines[i]).map(c => c.replace(/"/g,"").trim());
       if (cols.length <= Math.max(dateCol, amtCol)) continue;
 
       // 날짜 파싱
       let dateRaw = cols[dateCol] || "";
       let date = today;
-      const m = dateRaw.match(/(\d{4})[.\-\/](\d{1,2})[.\-\/](\d{1,2})/);
-      const m2 = dateRaw.match(/(\d{2})(\d{2})(\d{2})/);
-      const m3 = dateRaw.match(/(\d{4})(\d{2})(\d{2})/);
-      if (m) date = `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
-      else if (m3) date = `${m3[1]}-${m3[2]}-${m3[3]}`;
-      else if (m2) date = `20${m2[1]}-${m2[2]}-${m2[3]}`;
+      const dm  = dateRaw.match(/(\d{4})[.\-\/](\d{1,2})[.\-\/](\d{1,2})/);
+      const dm3 = dateRaw.match(/^(\d{4})(\d{2})(\d{2})$/);
+      const dm2 = dateRaw.match(/^(\d{2})(\d{2})(\d{2})$/);
+      if (dm)  date = `${dm[1]}-${dm[2].padStart(2,"0")}-${dm[3].padStart(2,"0")}`;
+      else if (dm3) date = `${dm3[1]}-${dm3[2]}-${dm3[3]}`;
+      else if (dm2) date = `20${dm2[1]}-${dm2[2]}-${dm2[3]}`;
 
-      // 금액 파싱
+      // 금액 파싱 (콤마·원·공백 모두 제거)
       const amtRaw = cols[amtCol] || "0";
       const amt = parseInt(amtRaw.replace(/[^0-9]/g,"")) || 0;
-      if (amt <= 0) continue; // 취소/환불/0원 제외
+      if (amt <= 0) continue;
 
       const memo = memoCol !== -1 ? (cols[memoCol] || "미상") : "미상";
 
       // 간단 카테고리 자동 분류
       const category = (() => {
-        const m = memo;
-        if (/스타벅스|커피|베이커리|맥도날드|버거킹|롯데리아|피자|치킨|식당|음식|한식|중식|일식|분식|김밥|도시락/.test(m)) return "식비";
-        if (/마트|이마트|홈플러스|롯데마트|코스트코|쿠팡|GS25|CU|세븐|편의점|농협|하나로/.test(m)) return "장보기";
-        if (/병원|의원|약국|약|클리닉|치과|한의원|건강/.test(m)) return "의료";
-        if (/학원|교육|책|문구|학습|어린이|유치원|학교/.test(m)) return "교육";
-        if (/영화|CGV|롯데시네마|넷플릭스|유튜브|게임|스포츠|헬스|여행|호텔/.test(m)) return "문화";
-        if (/쇼핑|백화점|아울렛|올리브영|다이소|무신사|쿠팡|배민|요기요/.test(m)) return "쇼핑";
-        if (/월세|관리비|전기|가스|수도|인터넷|통신|보험|아파트/.test(m)) return "주거";
+        const n = memo;
+        if (/스타벅스|커피|베이커리|맥도날드|버거킹|롯데리아|피자|치킨|식당|음식|한식|중식|일식|분식|김밥|도시락/.test(n)) return "식비";
+        if (/마트|이마트|홈플러스|롯데마트|코스트코|GS25|CU|세븐|편의점|농협|하나로/.test(n)) return "장보기";
+        if (/병원|의원|약국|클리닉|치과|한의원|건강/.test(n)) return "의료";
+        if (/학원|교육|문구|학습|어린이|유치원|학교/.test(n)) return "교육";
+        if (/영화|CGV|롯데시네마|넷플릭스|유튜브|게임|스포츠|헬스|여행|호텔/.test(n)) return "문화";
+        if (/백화점|아울렛|올리브영|다이소|무신사|배민|요기요|쇼핑/.test(n)) return "쇼핑";
+        if (/월세|관리비|전기|가스|수도|인터넷|통신|보험|아파트|SK텔레콤|KT|LG U/.test(n)) return "주거";
         return "기타";
       })();
 
