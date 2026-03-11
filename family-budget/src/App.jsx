@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import * as XLSX from "xlsx";
 import { AreaChart, Area, PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
@@ -291,22 +292,21 @@ ${content}`}]
     } finally { setParsing(false); }
   };
 
-  const handleCSV = (e) => {
+  const handleCSV = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      // 인코딩 문제 대비: EUC-KR 시도
-      const buf = ev.target.result;
-      let text = "";
-      try {
-        text = new TextDecoder("euc-kr").decode(buf);
-        if (text.includes("�")) text = new TextDecoder("utf-8").decode(buf);
-      } catch { text = new TextDecoder("utf-8").decode(buf); }
-      setRawText(text);
-      parseWithAI(text);
-    };
-    reader.readAsArrayBuffer(file);
+    setParsing(true); setParseError("");
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type:"array", cellDates:true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const csv = XLSX.utils.sheet_to_csv(ws);
+      setRawText(csv);
+      parseWithAI(csv);
+    } catch(err) {
+      setParseError("파일을 읽지 못했어요. 다시 시도해보세요.");
+      setParsing(false);
+    }
   };
 
   const save = () => {
