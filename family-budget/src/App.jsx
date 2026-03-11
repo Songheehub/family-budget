@@ -399,6 +399,56 @@ export default function App() {
     }));
   };
 
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferForm, setTransferForm] = useState({date:now.toISOString().slice(0,10),fromId:"",toId:"",amount:"",memo:"이체"});
+
+  const addTransfer = () => {
+    const { date, fromId, toId, amount, memo } = transferForm;
+    if (!fromId || !toId || !amount || fromId === toId) return;
+    const amt = parseInt(amount);
+    const transferId = Date.now();
+    // 이체 내역 2건 추가 (출금 + 입금)
+    const txOut = { id: transferId,     date, type:"transfer", amount: amt, memo: memo||"이체", accountId: fromId, toAccountId: toId, member: 9999, category:"이체", isTransfer:true, transferPair: transferId+1 };
+    const txIn  = { id: transferId+1,   date, type:"transfer", amount: amt, memo: memo||"이체", accountId: toId,   fromAccountId: fromId, member: 9999, category:"이체", isTransfer:true, isTransferIn:true, transferPair: transferId };
+    setTransactions(prev => [...prev, txOut, txIn]);
+    // 잔액 조정
+    setSetup(s => {
+      let newCats = adjustAccount(s.assetCats, fromId, -amt);
+      newCats = adjustAccount(newCats, toId, amt);
+      const entry = { month: thisMonthLabel };
+      newCats.forEach(c => { entry[c.label] = catTotal(c); });
+      const newHistory = (s.assetHistory||[]).some(h=>h.month===thisMonthLabel)
+        ? (s.assetHistory||[]).map(h=>h.month===thisMonthLabel?entry:h)
+        : [...(s.assetHistory||[]), entry];
+      return { ...s, assetCats: newCats, assetHistory: newHistory };
+    });
+    setShowTransferModal(false);
+    setTransferForm(f => ({...f, amount:"", memo:"이체"}));
+  };
+
+  const deleteTransfer = (tx) => {
+    const amt = tx.amount;
+    // 이체 쌍 둘 다 삭제
+    setTransactions(prev => prev.filter(x => x.id !== tx.id && x.id !== tx.transferPair));
+    // 잔액 복원
+    setSetup(s => {
+      let newCats = s.assetCats;
+      if (tx.isTransferIn) {
+        newCats = adjustAccount(newCats, tx.accountId, -amt);
+        newCats = adjustAccount(newCats, tx.fromAccountId, amt);
+      } else {
+        newCats = adjustAccount(newCats, tx.accountId, amt);
+        newCats = adjustAccount(newCats, tx.toAccountId, -amt);
+      }
+      const entry = { month: thisMonthLabel };
+      newCats.forEach(c => { entry[c.label] = catTotal(c); });
+      const newHistory = (s.assetHistory||[]).some(h=>h.month===thisMonthLabel)
+        ? (s.assetHistory||[]).map(h=>h.month===thisMonthLabel?entry:h)
+        : [...(s.assetHistory||[]), entry];
+      return { ...s, assetCats: newCats, assetHistory: newHistory };
+    });
+  };
+
   const addTx = () => {
     if (!txForm.amount || !txForm.memo || !txForm.member) return;
     const amt = parseInt(txForm.amount);
@@ -421,6 +471,7 @@ export default function App() {
   };
 
   const deleteTx = (tx) => {
+    if (tx.isTransfer) { deleteTransfer(tx); return; }
     setTransactions(prev => prev.filter(x => x.id !== tx.id));
     if (tx.accountId) {
       const delta = tx.type === "income" ? -tx.amount : tx.amount;
@@ -467,6 +518,7 @@ export default function App() {
               : lastSaved && <span style={{fontSize:11,color:"#bbb"}}>✓ 저장됨</span>
             }
             <button style={{background:"#F0EBE0",border:"none",borderRadius:10,padding:"8px 11px",fontSize:15,cursor:"pointer"}} onClick={()=>setShowSettingsModal(true)}>⚙️</button>
+            <button className="btn-g" style={{padding:"8px 13px",fontSize:13}} onClick={()=>setShowTransferModal(true)}>🔄 이체</button>
             <button className="btn-b" style={{padding:"8px 15px"}} onClick={()=>setShowTxModal(true)}>+ 추가</button>
           </div>
         </div>
@@ -685,15 +737,24 @@ export default function App() {
               ) : filteredTx.map(t=>{
                 const cat=CATEGORIES[t.category];
                 const mem=members.find(m=>m.id===t.member);
+                const allAccounts = assetCats.flatMap(c=>c.accounts);
+                if (t.isTransfer && t.isTransferIn) return null; // 이체 입금 행은 숨김
+                const isTransfer = t.isTransfer;
+                const fromAcc = isTransfer ? allAccounts.find(a=>String(a.id)===String(t.accountId)) : null;
+                const toAcc   = isTransfer ? allAccounts.find(a=>String(a.id)===String(t.toAccountId)) : null;
                 return (
                   <div key={t.id} className="tx-row">
-                    <div style={{width:37,height:37,borderRadius:11,background:cat?.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:19}}>{cat?.emoji}</div>
+                    <div style={{width:37,height:37,borderRadius:11,background:isTransfer?"#EEF2F9":cat?.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:19}}>
+                      {isTransfer?"🔄":cat?.emoji}
+                    </div>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:14,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.memo}</div>
-                      <div style={{fontSize:11,color:"#aaa",marginTop:2}}>{t.date} · {t.category} · {mem?.emoji}{mem?.name}{t.accountId ? ` · 💳 ${assetCats.flatMap(c=>c.accounts).find(a=>String(a.id)===String(t.accountId))?.name||""}` : ""}</div>
+                      <div style={{fontSize:11,color:"#aaa",marginTop:2}}>
+                        {t.date} · {isTransfer ? `${fromAcc?.name||"?"} → ${toAcc?.name||"?"}` : `${t.category} · ${mem?.emoji}${mem?.name}${t.accountId?` · 💳 ${allAccounts.find(a=>String(a.id)===String(t.accountId))?.name||""}`:""}` }
+                      </div>
                     </div>
-                    <div style={{fontSize:14,fontWeight:700,color:t.type==="income"?"#3BB273":"#E07A5F",whiteSpace:"nowrap",marginRight:5}}>
-                      {t.type==="income"?"+":"-"}{fmtShort(t.amount)}
+                    <div style={{fontSize:14,fontWeight:700,color:isTransfer?"#4A6FA5":t.type==="income"?"#3BB273":"#E07A5F",whiteSpace:"nowrap",marginRight:5}}>
+                      {isTransfer?`↔ ${fmtShort(t.amount)}`:t.type==="income"?`+${fmtShort(t.amount)}`:`-${fmtShort(t.amount)}`}
                     </div>
                     <button onClick={()=>deleteTx(t)} style={{background:"none",border:"none",color:"#ddd",fontSize:13,cursor:"pointer",padding:4}}>✕</button>
                   </div>
@@ -954,6 +1015,61 @@ export default function App() {
           </div>
         );
       })()}
+
+      {/* ── 이체 모달 ── */}
+      {showTransferModal && (
+        <div className="overlay" onClick={()=>setShowTransferModal(false)}>
+          <div className="sheet" onClick={e=>e.stopPropagation()}>
+            <div style={{width:36,height:4,background:"#E5E0D5",borderRadius:4,margin:"0 auto 20px"}}/>
+            <div style={{fontSize:17,fontWeight:700,marginBottom:6}}>🔄 통장 간 이체</div>
+            <div style={{fontSize:12,color:"#aaa",marginBottom:18}}>잔액이 자동으로 조정돼요</div>
+            <div style={{marginBottom:11}}>
+              <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>날짜</label>
+              <input className="inp" type="date" value={transferForm.date} onChange={e=>setTransferForm({...transferForm,date:e.target.value})}/>
+            </div>
+            <div style={{marginBottom:11}}>
+              <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>💸 출금 통장</label>
+              <select className="sel" value={transferForm.fromId} onChange={e=>setTransferForm({...transferForm,fromId:e.target.value})}>
+                <option value="">선택</option>
+                {assetCats.map(cat=>cat.accounts.map(acc=>(
+                  <option key={acc.id} value={acc.id}>{cat.emoji} {cat.label} › {acc.name} ({fmtShort(acc.amount)})</option>
+                )))}
+              </select>
+            </div>
+            <div style={{textAlign:"center",fontSize:20,margin:"4px 0"}}>↓</div>
+            <div style={{marginBottom:11}}>
+              <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>💰 입금 통장</label>
+              <select className="sel" value={transferForm.toId} onChange={e=>setTransferForm({...transferForm,toId:e.target.value})}>
+                <option value="">선택</option>
+                {assetCats.map(cat=>cat.accounts.map(acc=>(
+                  <option key={acc.id} value={acc.id} disabled={String(acc.id)===String(transferForm.fromId)}>{cat.emoji} {cat.label} › {acc.name} ({fmtShort(acc.amount)})</option>
+                )))}
+              </select>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:11}}>
+              <div>
+                <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>금액 (원)</label>
+                <input className="inp" type="number" placeholder="0" value={transferForm.amount} onChange={e=>setTransferForm({...transferForm,amount:e.target.value})}/>
+              </div>
+              <div>
+                <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>메모</label>
+                <input className="inp" placeholder="이체" value={transferForm.memo} onChange={e=>setTransferForm({...transferForm,memo:e.target.value})}/>
+              </div>
+            </div>
+            {transferForm.fromId && transferForm.toId && transferForm.amount && (
+              <div style={{background:"#EEF2F9",borderRadius:11,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#4A6FA5"}}>
+                {assetCats.flatMap(c=>c.accounts).find(a=>String(a.id)===String(transferForm.fromId))?.name} 에서
+                → {assetCats.flatMap(c=>c.accounts).find(a=>String(a.id)===String(transferForm.toId))?.name} 으로
+                <strong> {fmtShort(parseInt(transferForm.amount)||0)}</strong> 이체
+              </div>
+            )}
+            <div style={{display:"flex",gap:10}}>
+              <button className="btn-g" style={{flex:1}} onClick={()=>setShowTransferModal(false)}>취소</button>
+              <button className="btn-b" style={{flex:2}} onClick={addTransfer}>이체하기</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── 자산 수정 모달 ── */}
       {showAssetModal && <AssetEditModal assetCats={assetCats} onSave={saveAssets} onClose={()=>setShowAssetModal(false)}/>}
