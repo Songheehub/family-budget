@@ -3,18 +3,24 @@ import { AreaChart, Area, PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Cart
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 
-const CATEGORIES = {
-  식비: { emoji: "🍱", color: "#E07A5F" },
-  교통: { emoji: "🚗", color: "#4A6FA5" },
-  의료: { emoji: "💊", color: "#81B29A" },
-  교육: { emoji: "📚", color: "#F2CC8F" },
-  여가: { emoji: "🎮", color: "#C77DFF" },
-  쇼핑: { emoji: "🛍️", color: "#FF9F1C" },
-  주거: { emoji: "🏠", color: "#2EC4B6" },
-  저축: { emoji: "💰", color: "#3BB273" },
-  급여: { emoji: "💼", color: "#3BB273" },
-  기타: { emoji: "📦", color: "#aaa" },
+const EXPENSE_CATEGORIES = {
+  식비:   { emoji: "🍱", color: "#E07A5F" },
+  장보기: { emoji: "🛒", color: "#FF9F1C" },
+  의료:   { emoji: "💊", color: "#81B29A" },
+  교육:   { emoji: "📚", color: "#F2CC8F" },
+  문화:   { emoji: "🎭", color: "#C77DFF" },
+  쇼핑:   { emoji: "🛍️", color: "#4A6FA5" },
+  용돈:   { emoji: "💸", color: "#2EC4B6" },
+  기타:   { emoji: "📦", color: "#aaa" },
 };
+const INCOME_CATEGORIES = {
+  급여:   { emoji: "💼", color: "#3BB273" },
+  이자:   { emoji: "🏦", color: "#4A6FA5" },
+  상여:   { emoji: "🎁", color: "#FF9F1C" },
+  용돈:   { emoji: "💝", color: "#C77DFF" },
+  기타:   { emoji: "📦", color: "#aaa" },
+};
+const CATEGORIES = { ...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES };
 
 const MEMBER_COLORS = ["#4A6FA5","#E07A5F","#81B29A","#F2CC8F","#C77DFF","#FF9F1C"];
 const MEMBER_EMOJIS = ["👨","👩","🧒","👦","👧","🧓"];
@@ -229,7 +235,7 @@ export default function App() {
   const [showRecurringModal, setShowRecurringModal] = useState(false);
   const [recurringItems, setRecurringItems] = useState([]);
   const [recurringApplied, setRecurringApplied] = useState(false);
-  const [rForm, setRForm] = useState({memo:"",amount:"",category:"주거",type:"expense",day:1,member:"",accountId:"",toAccountId:""});
+  const [rForm, setRForm] = useState({memo:"",amount:"",category:"식비",type:"expense",day:1,member:"",accountId:"",toAccountId:""});
   const [txForm, setTxForm] = useState({date:now.toISOString().slice(0,10),type:"expense",amount:"",category:"식비",memo:"",member:"",accountId:""});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -779,7 +785,7 @@ export default function App() {
             <div className="card" style={{padding:0,overflow:"hidden"}}>
               <div style={{padding:"16px 18px 12px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #F5F0E8"}}>
                 <div style={{fontSize:14,fontWeight:700}}>고정 항목 관리</div>
-                <button onClick={()=>{setRForm({memo:"",amount:"",category:"주거",type:"expense",day:1,member:"",accountId:"",toAccountId:""});setShowRecurringModal("new");}}
+                <button onClick={()=>{setRForm({memo:"",amount:"",category:"식비",type:"expense",day:1,member:"",accountId:"",toAccountId:""});setShowRecurringModal("new");}}
                   style={{background:"#EEF2F9",border:"none",borderRadius:9,padding:"7px 13px",color:"#4A6FA5",fontSize:13,fontWeight:600,cursor:"pointer"}}>+ 추가</button>
               </div>
               {recurringItems.length === 0 ? (
@@ -910,8 +916,8 @@ export default function App() {
             <div style={{width:36,height:4,background:"#E5E0D5",borderRadius:4,margin:"0 auto 20px"}}/>
             <div style={{fontSize:17,fontWeight:700,marginBottom:16}}>내역 추가</div>
             <div className="tt">
-              <button className={`tb ${txForm.type==="expense"?"on":""}`} onClick={()=>setTxForm({...txForm,type:"expense"})} style={{color:txForm.type==="expense"?"#E07A5F":"#999"}}>🔴 지출</button>
-              <button className={`tb ${txForm.type==="income"?"on":""}`} onClick={()=>setTxForm({...txForm,type:"income"})} style={{color:txForm.type==="income"?"#3BB273":"#999"}}>💚 수입</button>
+              <button className={`tb ${txForm.type==="expense"?"on":""}`} onClick={()=>setTxForm({...txForm,type:"expense",category:"식비"})} style={{color:txForm.type==="expense"?"#E07A5F":"#999"}}>🔴 지출</button>
+              <button className={`tb ${txForm.type==="income"?"on":""}`} onClick={()=>setTxForm({...txForm,type:"income",category:"급여"})} style={{color:txForm.type==="income"?"#3BB273":"#999"}}>💚 수입</button>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:11}}>
               <div><label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>날짜</label>
@@ -922,7 +928,7 @@ export default function App() {
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:11}}>
               <div><label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>카테고리</label>
                 <select className="sel" value={txForm.category} onChange={e=>setTxForm({...txForm,category:e.target.value})}>
-                  {Object.entries(CATEGORIES).map(([k,v])=><option key={k} value={k}>{v.emoji} {k}</option>)}
+                  {Object.entries(txForm.type==="income"?INCOME_CATEGORIES:EXPENSE_CATEGORIES).map(([k,v])=><option key={k} value={k}>{v.emoji} {k}</option>)}
                 </select></div>
               <div><label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>가족 멤버</label>
                 <select className="sel" value={txForm.member} onChange={e=>setTxForm({...txForm,member:e.target.value})}>
@@ -983,8 +989,8 @@ export default function App() {
               <div style={{fontSize:17,fontWeight:700,marginBottom:16}}>{isNew?"고정항목 추가":"고정항목 수정"}</div>
               {/* 타입 선택 */}
               <div className="tt" style={{marginBottom:14}}>
-                <button className={`tb ${rForm.type==="expense"?"on":""}`} onClick={()=>setRForm({...rForm,type:"expense"})} style={{color:rForm.type==="expense"?"#E07A5F":"#999"}}>🔴 지출</button>
-                <button className={`tb ${rForm.type==="income"?"on":""}`} onClick={()=>setRForm({...rForm,type:"income"})} style={{color:rForm.type==="income"?"#3BB273":"#999"}}>💚 수입</button>
+                <button className={`tb ${rForm.type==="expense"?"on":""}`} onClick={()=>setRForm({...rForm,type:"expense",category:"식비"})} style={{color:rForm.type==="expense"?"#E07A5F":"#999"}}>🔴 지출</button>
+                <button className={`tb ${rForm.type==="income"?"on":""}`} onClick={()=>setRForm({...rForm,type:"income",category:"급여"})} style={{color:rForm.type==="income"?"#3BB273":"#999"}}>💚 수입</button>
                 <button className={`tb ${rForm.type==="transfer"?"on":""}`} onClick={()=>setRForm({...rForm,type:"transfer"})} style={{color:rForm.type==="transfer"?"#4A6FA5":"#999"}}>🔄 이체</button>
               </div>
               <div style={{marginBottom:11}}><label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>항목명</label>
@@ -1025,7 +1031,7 @@ export default function App() {
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:11}}>
                     <div><label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>카테고리</label>
                       <select className="sel" value={rForm.category} onChange={e=>setRForm({...rForm,category:e.target.value})}>
-                        {Object.entries(CATEGORIES).map(([k,v])=><option key={k} value={k}>{v.emoji} {k}</option>)}
+                        {Object.entries(rForm.type==="income"?INCOME_CATEGORIES:EXPENSE_CATEGORIES).map(([k,v])=><option key={k} value={k}>{v.emoji} {k}</option>)}
                       </select></div>
                     <div><label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>담당 멤버</label>
                       <select className="sel" value={rForm.member} onChange={e=>setRForm({...rForm,member:e.target.value})}>
