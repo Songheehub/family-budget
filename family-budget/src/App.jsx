@@ -31,9 +31,10 @@ const ASSET_EMOJIS = ["🏦","📈","🏠","💳","💎","🏧","💵"];
 const fmt = (n) => (n||0).toLocaleString() + "원";
 const fmtShort = (n) => {
   if (!n) return "0원";
-  if (n >= 100000000) return `${(n/100000000).toFixed(1)}억`;
-  if (n >= 10000000) return `${(n/10000000).toFixed(1)}천만`;
-  if (n >= 10000) return `${Math.round(n/10000)}만`;
+  const trim = (v) => parseFloat(v.toFixed(4)).toString();
+  if (n >= 100000000) return `${trim(n/100000000)}억`;
+  if (n >= 10000000) return `${trim(n/10000000)}천만`;
+  if (n >= 10000) return `${trim(n/10000)}만`;
   return `${n.toLocaleString()}원`;
 };
 
