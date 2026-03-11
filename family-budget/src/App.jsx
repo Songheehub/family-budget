@@ -278,17 +278,23 @@ memo는 가맹점명 또는 내용.
 [{"date":"2026-03-11","amount":15000,"memo":"스타벅스","category":"식비"}]
 
 내역:
-${content}`}]
+${content.slice(0, 8000)}`}]
         })
       });
+      if (!res.ok) {
+        const errBody = await res.text();
+        setParseError(`API 오류 (${res.status}): ${errBody.slice(0,100)}`);
+        return;
+      }
       const data = await res.json();
+      if (data.error) { setParseError(`API 오류: ${data.error.message}`); return; }
       const text = data.content?.filter(b=>b.type==="text").map(b=>b.text).join("") || "";
       const clean = text.replace(/```json|```/g,"").trim();
       const items = JSON.parse(clean);
       setParsed(items.map((it,i)=>({...it, _id:i, enabled:true})));
       setStep("confirm");
     } catch(e) {
-      setParseError("파싱 실패. 내용을 확인해보세요.");
+      setParseError(`오류: ${e.message}`);
     } finally { setParsing(false); }
   };
 
