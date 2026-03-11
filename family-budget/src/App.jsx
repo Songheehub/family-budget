@@ -11,7 +11,6 @@ const EXPENSE_CATEGORIES = {
   문화:   { emoji: "🎭", color: "#C77DFF" },
   쇼핑:   { emoji: "🛍️", color: "#4A6FA5" },
   용돈:   { emoji: "💸", color: "#2EC4B6" },
-  주거:   { emoji: "🏠", color: "#2EC4B6" },
   기타:   { emoji: "📦", color: "#aaa" },
 };
 const INCOME_CATEGORIES = {
@@ -233,6 +232,9 @@ export default function App() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState(null);
   const [expandedCat, setExpandedCat] = useState({});
+  const [chartView, setChartView] = useState("category"); // "category" | "account"
+  const [chartPeriod, setChartPeriod] = useState("monthly"); // "daily" | "monthly" | "yearly"
+  const [chartFocusCat, setChartFocusCat] = useState(null); // null = 전체, catId = 해당 카테고리 통장들
   const [showRecurringModal, setShowRecurringModal] = useState(false);
   const [recurringItems, setRecurringItems] = useState([]);
   const [recurringApplied, setRecurringApplied] = useState(false);
@@ -301,7 +303,7 @@ export default function App() {
     if (alreadyApplied) { setRecurringApplied(true); return; }
 
     const autoTx = recurringItems
-      .filter(r => r.active !== false)
+      .filter(r => r.active !== false && (r.day || 1) <= now.getDate())
       .flatMap(r => {
         const base = {
           date: `${thisMonth}-${String(r.day||1).padStart(2,"0")}`,
@@ -325,19 +327,25 @@ export default function App() {
       if (setup?.assetCats) {
         let newCats = [...setup.assetCats];
         autoTx.forEach(t => {
-          if (t.accountId) {
+          if (t.isTransfer) {
+            if (!t.isTransferIn && t.accountId) {
+              newCats = newCats.map(c => ({...c, accounts: c.accounts.map(a =>
+                String(a.id)===String(t.accountId) ? {...a, amount: Math.max(0,(a.amount||0)-t.amount)} : a
+              )}));
+            } else if (t.isTransferIn && t.accountId) {
+              newCats = newCats.map(c => ({...c, accounts: c.accounts.map(a =>
+                String(a.id)===String(t.accountId) ? {...a, amount: (a.amount||0)+t.amount} : a
+              )}));
+            }
+          } else if (t.accountId) {
             const delta = t.type === "income" ? t.amount : -t.amount;
             newCats = newCats.map(c => ({...c, accounts: c.accounts.map(a =>
               String(a.id)===String(t.accountId) ? {...a, amount: Math.max(0,(a.amount||0)+delta)} : a
             )}));
           }
         });
-        const entry = { month: thisMonthLabel };
-        newCats.forEach(c => { entry[c.label] = catTotal(c); });
-        const newHistory = (setup.assetHistory||[]).some(h=>h.month===thisMonthLabel)
-          ? (setup.assetHistory||[]).map(h=>h.month===thisMonthLabel?entry:h)
-          : [...(setup.assetHistory||[]), entry];
-        setSetup(s => ({...s, assetCats: newCats, assetHistory: newHistory}));
+        const { assetHistory, accountHistory } = buildSnapshot(newCats, setup);
+        setSetup(s => ({...s, assetCats: newCats, assetHistory, accountHistory}));
       }
     }
     setRecurringApplied(true);
@@ -368,9 +376,10 @@ export default function App() {
     fbSet("recurring", recurringItems).catch(() => {});
   }, [recurringItems, loading]);
 
-  const members    = setup?.members    || [];
-  const assetCats  = setup?.assetCats  || [];
+  const members      = setup?.members      || [];
+  const assetCats    = setup?.assetCats    || [];
   const assetHistory = setup?.assetHistory || [];
+  const accountHistory = setup?.accountHistory || [];
   const totalAssetValue = allTotal(assetCats);
 
   const monthTx      = useMemo(()=>transactions.filter(t=>t.date.startsWith(thisMonth)),[transactions]);
@@ -387,13 +396,31 @@ export default function App() {
   const memberExpense = useMemo(()=>members.map(m=>({...m,expense:monthTx.filter(t=>t.type==="expense"&&t.member===m.id).reduce((s,t)=>s+t.amount,0)})),[monthTx,members]);
   const filteredTx    = useMemo(()=>[...transactions].filter(t=>!selectedMember||t.member===selectedMember).sort((a,b)=>b.date.localeCompare(a.date)),[transactions,selectedMember]);
 
-  const saveAssets = (newCats) => {
+  // 자산 스냅샷 기록 (카테고리별 월간 + 통장별 일간)
+  const buildSnapshot = (newCats, prevSetup) => {
+    const todayStr = now.toISOString().slice(0,10);
+    // 카테고리 월별 히스토리
     const entry = { month: thisMonthLabel };
     newCats.forEach(c=>{ entry[c.label]=catTotal(c); });
-    const newHistory = assetHistory.some(h=>h.month===thisMonthLabel)
-      ? assetHistory.map(h=>h.month===thisMonthLabel?entry:h)
-      : [...assetHistory, entry];
-    setSetup(s=>({...s, assetCats:newCats, assetHistory:newHistory}));
+    const prevHistory = prevSetup?.assetHistory || [];
+    const newHistory = prevHistory.some(h=>h.month===thisMonthLabel)
+      ? prevHistory.map(h=>h.month===thisMonthLabel?entry:h)
+      : [...prevHistory, entry];
+    // 통장별 일간 히스토리
+    const accEntry = { date: todayStr };
+    newCats.forEach(c=>c.accounts.forEach(a=>{ accEntry[String(a.id)] = a.amount||0; }));
+    const prevAccHistory = prevSetup?.accountHistory || [];
+    const newAccHistory = prevAccHistory.some(h=>h.date===todayStr)
+      ? prevAccHistory.map(h=>h.date===todayStr?accEntry:h)
+      : [...prevAccHistory, accEntry];
+    return { assetHistory: newHistory, accountHistory: newAccHistory };
+  };
+
+  const saveAssets = (newCats) => {
+    setSetup(s => {
+      const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
+      return { ...s, assetCats: newCats, assetHistory, accountHistory };
+    });
     setShowAssetModal(false);
   };
 
@@ -425,12 +452,8 @@ export default function App() {
     setSetup(s => {
       let newCats = adjustAccount(s.assetCats, fromId, -amt);
       newCats = adjustAccount(newCats, toId, amt);
-      const entry = { month: thisMonthLabel };
-      newCats.forEach(c => { entry[c.label] = catTotal(c); });
-      const newHistory = (s.assetHistory||[]).some(h=>h.month===thisMonthLabel)
-        ? (s.assetHistory||[]).map(h=>h.month===thisMonthLabel?entry:h)
-        : [...(s.assetHistory||[]), entry];
-      return { ...s, assetCats: newCats, assetHistory: newHistory };
+      const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
+      return { ...s, assetCats: newCats, assetHistory, accountHistory };
     });
     setShowTransferModal(false);
     setTransferForm(f => ({...f, amount:"", memo:"이체"}));
@@ -450,12 +473,8 @@ export default function App() {
         newCats = adjustAccount(newCats, tx.accountId, amt);
         newCats = adjustAccount(newCats, tx.toAccountId, -amt);
       }
-      const entry = { month: thisMonthLabel };
-      newCats.forEach(c => { entry[c.label] = catTotal(c); });
-      const newHistory = (s.assetHistory||[]).some(h=>h.month===thisMonthLabel)
-        ? (s.assetHistory||[]).map(h=>h.month===thisMonthLabel?entry:h)
-        : [...(s.assetHistory||[]), entry];
-      return { ...s, assetCats: newCats, assetHistory: newHistory };
+      const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
+      return { ...s, assetCats: newCats, assetHistory, accountHistory };
     });
   };
 
@@ -468,12 +487,8 @@ export default function App() {
       const delta = txForm.type === "income" ? amt : -amt;
       setSetup(s => {
         const newCats = adjustAccount(s.assetCats, txForm.accountId, delta);
-        const entry = { month: thisMonthLabel };
-        newCats.forEach(c => { entry[c.label] = catTotal(c); });
-        const newHistory = (s.assetHistory||[]).some(h=>h.month===thisMonthLabel)
-          ? (s.assetHistory||[]).map(h=>h.month===thisMonthLabel?entry:h)
-          : [...(s.assetHistory||[]), entry];
-        return { ...s, assetCats: newCats, assetHistory: newHistory };
+        const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
+        return { ...s, assetCats: newCats, assetHistory, accountHistory };
       });
     }
     setShowTxModal(false);
@@ -487,12 +502,8 @@ export default function App() {
       const delta = tx.type === "income" ? -tx.amount : tx.amount;
       setSetup(s => {
         const newCats = adjustAccount(s.assetCats, tx.accountId, delta);
-        const entry = { month: thisMonthLabel };
-        newCats.forEach(c => { entry[c.label] = catTotal(c); });
-        const newHistory = (s.assetHistory||[]).some(h=>h.month===thisMonthLabel)
-          ? (s.assetHistory||[]).map(h=>h.month===thisMonthLabel?entry:h)
-          : [...(s.assetHistory||[]), entry];
-        return { ...s, assetCats: newCats, assetHistory: newHistory };
+        const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
+        return { ...s, assetCats: newCats, assetHistory, accountHistory };
       });
     }
   };
@@ -695,33 +706,123 @@ export default function App() {
               );
             })}
 
-            {assetHistory.length>0 && assetCats.length>0 && (
-              <div className="card">
-                <div style={{fontSize:14,fontWeight:700,marginBottom:15}}>자산 변동 추이</div>
-                <ResponsiveContainer width="100%" height={200}>
-                  <AreaChart data={assetHistory}>
-                    <defs>
-                      {assetCats.map(c=>(
-                        <linearGradient key={c.id} id={`g${c.id}`} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={c.color} stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor={c.color} stopOpacity={0}/>
-                        </linearGradient>
+            {/* ── 자산 추이 차트 ── */}
+            {(assetHistory.length>0 || accountHistory.length>0) && assetCats.length>0 && (()=>{
+              const allAccounts = assetCats.flatMap(c=>c.accounts.map(a=>({...a,catLabel:c.label,catColor:c.color,catId:c.id})));
+
+              // 집계 함수
+              const aggregate = (entries, keyFn) => {
+                const map = {};
+                entries.forEach(e => {
+                  const k = keyFn(e.date||e.month||"");
+                  map[k] = e; // 같은 기간 중 마지막 값
+                });
+                return Object.entries(map).sort(([a],[b])=>a.localeCompare(b)).map(([,v])=>v);
+              };
+
+              let chartData = [];
+              let lines = [];
+
+              if (chartView==="category") {
+                // 카테고리별: assetHistory 기반
+                const raw = assetHistory.map(h=>({...h, _key: h.month}));
+                if (chartPeriod==="yearly") {
+                  const map={};
+                  raw.forEach(h=>{ const y=(h.month||"").slice(0,4); map[y]=h; });
+                  chartData = Object.entries(map).sort(([a],[b])=>a.localeCompare(b)).map(([,v])=>({...v,_key:v.month?.slice(0,4)||""}));
+                } else {
+                  chartData = raw;
+                }
+                lines = assetCats.map(c=>({key:c.label,color:c.color,label:c.label}));
+
+              } else {
+                // 통장별: accountHistory 기반
+                const focusCat = chartFocusCat ? assetCats.find(c=>c.id===chartFocusCat) : null;
+                const targetAccs = focusCat ? focusCat.accounts : allAccounts;
+
+                let raw = [...accountHistory].sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+
+                if (chartPeriod==="monthly") {
+                  raw = aggregate(raw, d=>d.slice(0,7));
+                  chartData = raw.map(e=>({...e,_key:e.date?.slice(0,7)||""}));
+                } else if (chartPeriod==="yearly") {
+                  raw = aggregate(raw, d=>d.slice(0,4));
+                  chartData = raw.map(e=>({...e,_key:e.date?.slice(0,4)||""}));
+                } else {
+                  chartData = raw.map(e=>({...e,_key:e.date||""}));
+                }
+                lines = targetAccs.map((a,i)=>({key:String(a.id),color:focusCat?focusCat.color:ASSET_COLORS[i%7],label:a.name}));
+              }
+
+              const xKey = "_key";
+
+              return (
+                <div className="card">
+                  <div style={{fontSize:14,fontWeight:700,marginBottom:12}}>자산 변동 추이</div>
+
+                  {/* 뷰 토글 */}
+                  <div style={{display:"flex",gap:7,marginBottom:10,flexWrap:"wrap"}}>
+                    <div className="tt" style={{flex:"none",marginBottom:0}}>
+                      {[["category","📊 카테고리"],["account","🏦 통장별"]].map(([v,l])=>(
+                        <button key={v} className={`tb ${chartView===v?"on":""}`} onClick={()=>setChartView(v)} style={{color:chartView===v?"#4A6FA5":"#999",fontSize:12,padding:"7px 10px"}}>{l}</button>
                       ))}
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE0"/>
-                    <XAxis dataKey="month" tick={{fontSize:11,fill:"#aaa"}} axisLine={false} tickLine={false}/>
-                    <YAxis tick={{fontSize:10,fill:"#aaa"}} tickFormatter={v=>v>=100000000?`${(v/100000000).toFixed(0)}억`:`${Math.round(v/10000)}만`} axisLine={false} tickLine={false}/>
-                    <Tooltip formatter={v=>fmt(v)} contentStyle={{borderRadius:12,border:"none",fontFamily:"inherit",fontSize:12}}/>
-                    <Legend/>
-                    {assetCats.map(c=>(
-                      <Area key={c.id} type="monotone" dataKey={c.label} stackId="1" stroke={c.color} fill={`url(#g${c.id})`} strokeWidth={2}/>
-                    ))}
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            )}
+                    </div>
+                    <div className="tt" style={{flex:"none",marginBottom:0}}>
+                      {[["daily","일별"],["monthly","월별"],["yearly","연도별"]].map(([v,l])=>(
+                        <button key={v} className={`tb ${chartPeriod===v?"on":""}`} onClick={()=>setChartPeriod(v)} style={{color:chartPeriod===v?"#4A6FA5":"#999",fontSize:12,padding:"7px 10px"}}>{l}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 통장별일 때 카테고리 필터 */}
+                  {chartView==="account" && (
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+                      <button onClick={()=>setChartFocusCat(null)} className="chip"
+                        style={{border:`1.5px solid ${!chartFocusCat?"#4A6FA5":"#E5E0D5"}`,background:!chartFocusCat?"#EEF2F9":"white",color:!chartFocusCat?"#4A6FA5":"#666"}}>전체</button>
+                      {assetCats.map(c=>(
+                        <button key={c.id} onClick={()=>setChartFocusCat(chartFocusCat===c.id?null:c.id)} className="chip"
+                          style={{border:`1.5px solid ${chartFocusCat===c.id?c.color:"#E5E0D5"}`,background:chartFocusCat===c.id?c.color+"22":"white",color:chartFocusCat===c.id?c.color:"#666"}}>
+                          {c.emoji} {c.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {chartData.length < 2 ? (
+                    <div style={{textAlign:"center",padding:"24px 0",color:"#aaa",fontSize:13}}>
+                      📅 내역이 쌓이면 추이가 표시돼요
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={220}>
+                      <AreaChart data={chartData}>
+                        <defs>
+                          {lines.map(l=>(
+                            <linearGradient key={l.key} id={`gh_${l.key}`} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor={l.color} stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor={l.color} stopOpacity={0}/>
+                            </linearGradient>
+                          ))}
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE0"/>
+                        <XAxis dataKey={xKey} tick={{fontSize:10,fill:"#aaa"}} axisLine={false} tickLine={false}
+                          tickFormatter={v=>chartPeriod==="daily"?v.slice(5):chartPeriod==="monthly"?v.slice(2):v}/>
+                        <YAxis tick={{fontSize:10,fill:"#aaa"}} tickFormatter={v=>v>=100000000?`${(v/100000000).toFixed(0)}억`:v>=10000?`${Math.round(v/10000)}만`:`${v}`} axisLine={false} tickLine={false}/>
+                        <Tooltip formatter={(v,name)=>[fmt(v), lines.find(l=>l.key===name)?.label||name]} contentStyle={{borderRadius:12,border:"none",fontFamily:"inherit",fontSize:12}}/>
+                        <Legend formatter={name=>lines.find(l=>l.key===name)?.label||name}/>
+                        {lines.map((l,i)=>(
+                          <Area key={l.key} type="monotone" dataKey={l.key}
+                            stackId={chartView==="category"?"1":undefined}
+                            stroke={l.color} fill={`url(#gh_${l.key})`} strokeWidth={2}
+                            name={l.key}/>
+                        ))}
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              );
+            })()}
             <div className="card" style={{textAlign:"center",padding:16,color:"#aaa",fontSize:13}}>
-              📅 매달 자산을 업데이트하면 추이 그래프가 쌓여요!
+              💡 내역을 추가하거나 자산 수정 시 자동으로 추이가 기록돼요
             </div>
           </div>
         )}
