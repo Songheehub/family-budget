@@ -243,6 +243,189 @@ function CardAddForm({ members, onAdd }) {
   );
 }
 
+// ── 카드 일괄 입력 모달 ──
+function BulkCardModal({ cards, members, assetCats, today, onSave, onClose }) {
+  const [step, setStep] = useState("input"); // input | confirm
+  const [cardId, setCardId] = useState(String(cards[0]?.id||""));
+  const [memberId, setMemberId] = useState(String(members[0]?.id||""));
+  const [rawText, setRawText] = useState("");
+  const [parsed, setParsed] = useState([]);
+  const [parsing, setParsing] = useState(false);
+  const [parseError, setParseError] = useState("");
+  const [inputMode, setInputMode] = useState("text"); // "text" | "csv"
+  const fileRef = React.useRef();
+
+  const EXPENSE_CATEGORIES = ["식비","장보기","의료","교육","문화","쇼핑","용돈","주거","기타"];
+
+  const parseWithAI = async (content) => {
+    setParsing(true); setParseError("");
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          model:"claude-sonnet-4-20250514",
+          max_tokens:2000,
+          messages:[{role:"user", content:`다음은 카드 사용내역입니다 (문자/텍스트이거나 CSV일 수 있어요). 각 결제 건을 파싱해서 JSON 배열로만 응답하세요. 다른 말 없이 JSON만.
+
+카테고리는 반드시 다음 중 하나: ${EXPENSE_CATEGORIES.join(",")}
+날짜가 없으면 오늘(${today}) 사용. 날짜 형식은 YYYY-MM-DD.
+금액은 숫자만(원, 콤마 제거). 지출만 포함, 취소/환불 제외.
+memo는 가맹점명 또는 내용.
+
+응답 형식:
+[{"date":"2026-03-11","amount":15000,"memo":"스타벅스","category":"식비"}]
+
+내역:
+${content}`}]
+        })
+      });
+      const data = await res.json();
+      const text = data.content?.filter(b=>b.type==="text").map(b=>b.text).join("") || "";
+      const clean = text.replace(/```json|```/g,"").trim();
+      const items = JSON.parse(clean);
+      setParsed(items.map((it,i)=>({...it, _id:i, enabled:true})));
+      setStep("confirm");
+    } catch(e) {
+      setParseError("파싱 실패. 내용을 확인해보세요.");
+    } finally { setParsing(false); }
+  };
+
+  const handleCSV = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      // 인코딩 문제 대비: EUC-KR 시도
+      const buf = ev.target.result;
+      let text = "";
+      try {
+        text = new TextDecoder("euc-kr").decode(buf);
+        if (text.includes("�")) text = new TextDecoder("utf-8").decode(buf);
+      } catch { text = new TextDecoder("utf-8").decode(buf); }
+      setRawText(text);
+      parseWithAI(text);
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const save = () => {
+    const txs = parsed.filter(p=>p.enabled).map((p,i)=>({
+      id: Date.now() + i,
+      date: p.date,
+      type: "expense",
+      amount: parseInt(p.amount)||0,
+      category: p.category||"기타",
+      memo: p.memo,
+      member: parseInt(memberId)||members[0]?.id,
+      cardId: cardId,
+      accountId: "",
+    }));
+    onSave(txs);
+  };
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" style={{maxHeight:"85vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <div style={{width:36,height:4,background:"#E5E0D5",borderRadius:4,margin:"0 auto 18px"}}/>
+        <div style={{fontSize:17,fontWeight:700,marginBottom:4}}>💳 카드내역 일괄 입력</div>
+        <div style={{fontSize:12,color:"#aaa",marginBottom:16}}>카드사 앱에서 내보낸 CSV 또는 문자 내역을 붙여넣으세요</div>
+
+        {step==="input" ? (<>
+          <div style={{display:"flex",gap:10,marginBottom:12}}>
+            <div style={{flex:1}}>
+              <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>카드</label>
+              <select className="sel" value={cardId} onChange={e=>setCardId(e.target.value)}>
+                {cards.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div style={{flex:1}}>
+              <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>카드 주인</label>
+              <select className="sel" value={memberId} onChange={e=>setMemberId(e.target.value)}>
+                {members.filter(m=>m.id!==9999).map(m=><option key={m.id} value={m.id}>{m.emoji} {m.name}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* 입력 방식 탭 */}
+          <div className="tt" style={{marginBottom:12}}>
+            <button className={`tb ${inputMode==="csv"?"on":""}`} onClick={()=>setInputMode("csv")} style={{color:inputMode==="csv"?"#4A6FA5":"#999",fontSize:12}}>📁 CSV 파일</button>
+            <button className={`tb ${inputMode==="text"?"on":""}`} onClick={()=>setInputMode("text")} style={{color:inputMode==="text"?"#4A6FA5":"#999",fontSize:12}}>📋 텍스트 붙여넣기</button>
+          </div>
+
+          {inputMode==="csv" ? (
+            <div>
+              <input ref={fileRef} type="file" accept=".csv,.xls,.xlsx,.txt" style={{display:"none"}} onChange={handleCSV}/>
+              <button onClick={()=>fileRef.current.click()}
+                style={{width:"100%",padding:"32px 20px",background:"#FAFAF7",border:"2px dashed #C8BFB0",borderRadius:16,cursor:"pointer",fontFamily:"inherit",display:"flex",flexDirection:"column",alignItems:"center",gap:10}}>
+                <span style={{fontSize:36}}>📁</span>
+                <span style={{fontSize:14,fontWeight:600,color:"#555"}}>CSV 파일 선택</span>
+                <span style={{fontSize:11,color:"#aaa",textAlign:"center",lineHeight:1.6}}>
+                  신한·현대·삼성·국민·하나·롯데·BC 카드<br/>카드사 앱 → 사용내역 → 내보내기/다운로드
+                </span>
+              </button>
+              {parsing && <div style={{textAlign:"center",padding:"16px 0",color:"#4A6FA5",fontSize:13}}>✨ AI가 내역을 분석 중이에요…</div>}
+            </div>
+          ) : (
+            <div>
+              <textarea value={rawText} onChange={e=>setRawText(e.target.value)}
+                placeholder={"카드사 문자 또는 내역을 붙여넣으세요:\n\n[신한카드] 15,000원 스타벅스 승인 03/10\n[신한카드] 32,000원 올리브영 승인 03/11"}
+                style={{width:"100%",minHeight:160,padding:12,borderRadius:12,border:"1.5px solid #E5E0D5",fontSize:13,fontFamily:"inherit",resize:"vertical",background:"#FAFAF7",boxSizing:"border-box",lineHeight:1.6}}/>
+              {parsing && <div style={{textAlign:"center",padding:"8px 0",color:"#4A6FA5",fontSize:13}}>✨ AI 분석 중…</div>}
+            </div>
+          )}
+
+          {parseError && <div style={{fontSize:12,color:"#E07A5F",marginTop:6}}>{parseError}</div>}
+
+          {inputMode==="text" && (
+            <div style={{display:"flex",gap:10,marginTop:14}}>
+              <button className="btn-g" style={{flex:1}} onClick={onClose}>취소</button>
+              <button className="btn-b" style={{flex:2}} onClick={()=>parseWithAI(rawText)} disabled={parsing||!rawText.trim()}>
+                {parsing ? "AI 분석 중…" : "✨ 자동 파싱"}
+              </button>
+            </div>
+          )}
+          {inputMode==="csv" && !parsing && (
+            <button className="btn-g" style={{width:"100%",marginTop:12}} onClick={onClose}>취소</button>
+          )}
+        </>) : (<>
+          <div style={{fontSize:13,fontWeight:600,marginBottom:10,color:"#555"}}>파싱된 내역 확인 <span style={{color:"#4A6FA5"}}>{parsed.filter(p=>p.enabled).length}건 선택됨</span></div>
+          <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+            {parsed.map((p,i)=>(
+              <div key={p._id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:p.enabled?"#FAFAF7":"#f5f5f5",borderRadius:12,border:`1.5px solid ${p.enabled?"#E5E0D5":"#eee"}`,opacity:p.enabled?1:0.5}}>
+                <input type="checkbox" checked={p.enabled} onChange={e=>setParsed(prev=>prev.map((x,j)=>j===i?{...x,enabled:e.target.checked}:x))} style={{width:16,height:16,accentColor:"#4A6FA5",flexShrink:0}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}>
+                    <input value={p.memo} onChange={e=>setParsed(prev=>prev.map((x,j)=>j===i?{...x,memo:e.target.value}:x))}
+                      style={{fontSize:13,fontWeight:500,border:"none",background:"transparent",flex:1,minWidth:80,fontFamily:"inherit"}}/>
+                    <select value={p.category} onChange={e=>setParsed(prev=>prev.map((x,j)=>j===i?{...x,category:e.target.value}:x))}
+                      style={{fontSize:11,border:"1px solid #E5E0D5",borderRadius:7,padding:"2px 6px",background:"white",fontFamily:"inherit"}}>
+                      {EXPENSE_CATEGORIES.map(c=><option key={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <input value={p.date} onChange={e=>setParsed(prev=>prev.map((x,j)=>j===i?{...x,date:e.target.value}:x))}
+                      style={{fontSize:11,color:"#aaa",border:"none",background:"transparent",fontFamily:"inherit",width:90}}/>
+                    <input type="number" value={p.amount} onChange={e=>setParsed(prev=>prev.map((x,j)=>j===i?{...x,amount:parseInt(e.target.value)||0}:x))}
+                      style={{fontSize:13,fontWeight:700,color:"#E07A5F",border:"none",background:"transparent",fontFamily:"inherit",width:90,textAlign:"right"}}/>
+                    <span style={{fontSize:12,color:"#E07A5F"}}>원</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <button className="btn-g" style={{flex:1}} onClick={()=>setStep("input")}>← 다시</button>
+            <button className="btn-b" style={{flex:2}} onClick={save} disabled={!parsed.some(p=>p.enabled)}>
+              저장 ({parsed.filter(p=>p.enabled).length}건)
+            </button>
+          </div>
+        </>)}
+      </div>
+    </div>
+  );
+}
+
 // ────────────────────────────────────────────
 // 메인 앱
 // ────────────────────────────────────────────
@@ -256,6 +439,7 @@ export default function App() {
   const [showCardModal, setShowCardModal] = useState(false);
   const [showSettleModal, setShowSettleModal] = useState(null);
   const [settleAccountId, setSettleAccountId] = useState("");
+  const [showBulkCardModal, setShowBulkCardModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState(null);
   const [expandedCat, setExpandedCat] = useState({});
   const [chartView, setChartView] = useState("category");
@@ -601,6 +785,7 @@ export default function App() {
             }
             <button style={{background:"#F0EBE0",border:"none",borderRadius:10,padding:"8px 11px",fontSize:15,cursor:"pointer"}} onClick={()=>setShowSettingsModal(true)}>⚙️</button>
             <button className="btn-g" style={{padding:"8px 13px",fontSize:13}} onClick={()=>setShowTransferModal(true)}>🔄 이체</button>
+            {cards.length>0 && <button className="btn-g" style={{padding:"8px 13px",fontSize:13}} onClick={()=>setShowBulkCardModal(true)}>💳 일괄</button>}
             <button className="btn-b" style={{padding:"8px 15px"}} onClick={()=>setShowTxModal(true)}>+ 추가</button>
           </div>
         </div>
@@ -1188,6 +1373,19 @@ export default function App() {
         </div>
       )}
 
+      {/* ── 카드 일괄 입력 모달 ── */}
+      {showBulkCardModal && (()=>{
+        return <BulkCardModal
+          cards={cards} members={members} assetCats={assetCats}
+          today={now.toISOString().slice(0,10)}
+          onSave={(txs)=>{
+            setTransactions(prev=>[...prev, ...txs]);
+            setShowBulkCardModal(false);
+          }}
+          onClose={()=>setShowBulkCardModal(false)}
+        />;
+      })()}
+
       {/* ── 카드 정산 모달 ── */}
       {showSettleModal && (
         <div className="overlay" onClick={()=>setShowSettleModal(null)}>
@@ -1250,7 +1448,9 @@ export default function App() {
                 <div><label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>금액 (원)</label>
                   <input className="inp" type="number" placeholder="0" value={rForm.amount} onChange={e=>setRForm({...rForm,amount:e.target.value})}/></div>
                 <div><label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>매월 몇 일</label>
-                  <input className="inp" type="number" min="1" max="31" placeholder="1" value={rForm.day} onChange={e=>setRForm({...rForm,day:parseInt(e.target.value)||1})}/></div>
+                  <select className="sel" value={rForm.day} onChange={e=>setRForm({...rForm,day:parseInt(e.target.value)})}>
+                    {Array.from({length:31},(_,i)=>i+1).map(d=><option key={d} value={d}>{d}일</option>)}
+                  </select></div>
               </div>
 
               {isTransfer ? (
