@@ -253,7 +253,7 @@ function BulkCardModal({ cards, members, assetCats, today, onSave, onClose }) {
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState("");
   const [inputMode, setInputMode] = useState("text"); // "text" | "csv"
-  const fileRef = React.useRef();
+  const fileRef = useRef();
 
   const EXPENSE_CATEGORIES = ["식비","장보기","의료","교육","문화","쇼핑","용돈","주거","기타"];
 
@@ -1374,8 +1374,7 @@ export default function App() {
       )}
 
       {/* ── 카드 일괄 입력 모달 ── */}
-      {showBulkCardModal && (()=>{
-        return <BulkCardModal
+      {showBulkCardModal && <BulkCardModal
           cards={cards} members={members} assetCats={assetCats}
           today={now.toISOString().slice(0,10)}
           onSave={(txs)=>{
@@ -1383,8 +1382,7 @@ export default function App() {
             setShowBulkCardModal(false);
           }}
           onClose={()=>setShowBulkCardModal(false)}
-        />;
-      })()}
+        />}
 
       {/* ── 카드 정산 모달 ── */}
       {showSettleModal && (
