@@ -11,6 +11,7 @@ const EXPENSE_CATEGORIES = {
   문화:   { emoji: "🎭", color: "#C77DFF" },
   쇼핑:   { emoji: "🛍️", color: "#4A6FA5" },
   용돈:   { emoji: "💸", color: "#2EC4B6" },
+  주거:   { emoji: "🏠", color: "#3BB273" },
   기타:   { emoji: "📦", color: "#aaa" },
 };
 const INCOME_CATEGORIES = {
@@ -620,12 +621,16 @@ export default function App() {
                 <div style={{display:"flex",flexDirection:"column",gap:6}}>
                   {recurringItems.filter(r=>r.active!==false).slice(0,3).map(r=>{
                     const cat = CATEGORIES[r.category];
+                    const isPast = (r.day||1) <= now.getDate();
+                    const isTransfer = r.type==="transfer";
                     return (
-                      <div key={r.id} style={{display:"flex",alignItems:"center",gap:9}}>
-                        <span style={{fontSize:15}}>{cat?.emoji||"📦"}</span>
+                      <div key={r.id} style={{display:"flex",alignItems:"center",gap:9,opacity:isPast?1:0.45}}>
+                        <span style={{fontSize:15}}>{isTransfer?"🔄":cat?.emoji||"📦"}</span>
                         <span style={{fontSize:13,flex:1,color:"#444"}}>{r.memo}</span>
-                        <span style={{fontSize:13,fontWeight:600,color:"#E07A5F"}}>-{fmtShort(r.amount)}</span>
-                        <span style={{fontSize:11,color:"#bbb"}}>{r.day}일</span>
+                        <span style={{fontSize:13,fontWeight:600,color:isTransfer?"#4A6FA5":r.type==="income"?"#3BB273":"#E07A5F"}}>
+                          {isTransfer?"↔":r.type==="income"?"+":"-"}{fmtShort(r.amount)}
+                        </span>
+                        <span style={{fontSize:11,color:isPast?"#bbb":"#FF9F1C"}}>{r.day}일{!isPast?" (예정)":""}</span>
                       </div>
                     );
                   })}
@@ -635,7 +640,7 @@ export default function App() {
                 </div>
                 <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #F5F0E8",display:"flex",justifyContent:"space-between"}}>
                   <span style={{fontSize:12,color:"#999"}}>이번 달 고정지출 합계</span>
-                  <span style={{fontSize:14,fontWeight:700,color:"#E07A5F"}}>{fmtShort(recurringItems.filter(r=>r.active!==false&&r.type!=="income").reduce((s,r)=>s+r.amount,0))}</span>
+                  <span style={{fontSize:14,fontWeight:700,color:"#E07A5F"}}>{fmtShort(recurringItems.filter(r=>r.active!==false&&r.type==="expense"&&(r.day||1)<=now.getDate()).reduce((s,r)=>s+r.amount,0))}</span>
                 </div>
               </div>
             )}
@@ -880,7 +885,7 @@ export default function App() {
           <div className="up" style={{display:"flex",flexDirection:"column",gap:13}}>
             <div style={{background:"linear-gradient(135deg,#E07A5F,#C4614A)",borderRadius:20,padding:"18px 22px",color:"white"}}>
               <div style={{fontSize:11,opacity:.8,marginBottom:3}}>매월 고정 지출</div>
-              <div style={{fontSize:28,fontWeight:700}}>{fmtShort(recurringItems.filter(r=>r.active!==false&&r.type!=="income").reduce((s,r)=>s+r.amount,0))}</div>
+              <div style={{fontSize:28,fontWeight:700}}>{fmtShort(recurringItems.filter(r=>r.active!==false&&r.type==="expense"&&(r.day||1)<=now.getDate()).reduce((s,r)=>s+r.amount,0))}</div>
               <div style={{fontSize:12,opacity:.75,marginTop:4}}>{recurringItems.filter(r=>r.active!==false).length}개 항목 · 매달 자동 적용</div>
             </div>
 
