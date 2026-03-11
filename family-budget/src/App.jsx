@@ -11,6 +11,7 @@ const EXPENSE_CATEGORIES = {
   문화:   { emoji: "🎭", color: "#C77DFF" },
   쇼핑:   { emoji: "🛍️", color: "#4A6FA5" },
   용돈:   { emoji: "💸", color: "#2EC4B6" },
+  주거:   { emoji: "🏠", color: "#2EC4B6" },
   기타:   { emoji: "📦", color: "#aaa" },
 };
 const INCOME_CATEGORIES = {
