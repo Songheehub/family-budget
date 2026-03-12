@@ -8,6 +8,8 @@ const EXPENSE_CATEGORIES = {
   장보기:     { emoji: "🛒", color: "#FF9F1C" },
   "카페·디저트": { emoji: "☕", color: "#A0785A" },
   의료:       { emoji: "💊", color: "#81B29A" },
+  통신:       { emoji: "📱", color: "#5C85D6" },
+  공과금:     { emoji: "🔌", color: "#6DBF9E" },
   교육:       { emoji: "📚", color: "#F2CC8F" },
   문화:       { emoji: "🎭", color: "#C77DFF" },
   쇼핑:       { emoji: "🛍️", color: "#4A6FA5" },
@@ -254,7 +256,7 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
   const [inputMode, setInputMode] = useState("text"); // "text" | "csv"
   const fileRef = useRef();
 
-  const EXPENSE_CATEGORIES = ["식비","장보기","카페·디저트","의료","교육","문화","쇼핑","여행","용돈","주거","기타"];
+  const EXPENSE_CATEGORIES = ["식비","장보기","카페·디저트","의료","통신","공과금","교육","문화","쇼핑","여행","용돈","주거","기타"];
 
   const parseWithAI = async (content) => {
     setParsing(true); setParseError("");
@@ -360,11 +362,13 @@ ${content.slice(0, 8000)}`}]
         if (/카페|디저트|케이크|마카롱|빵|파리바게|뚜레쥬르|이디야|투썸|할리스|폴바셋/.test(n)) return "카페·디저트";
         if (/마트|이마트|홈플러스|롯데마트|코스트코|GS25|CU|세븐|편의점|농협|하나로/.test(n)) return "장보기";
         if (/병원|의원|약국|클리닉|치과|한의원|건강/.test(n)) return "의료";
+        if (/SK텔레콤|KT|LG U\+|통신|휴대폰|인터넷|알뜰폰/.test(n)) return "통신";
+        if (/전기|가스|수도|관리비|공과금|한국전력|도시가스/.test(n)) return "공과금";
         if (/학원|교육|문구|학습|어린이|유치원|학교/.test(n)) return "교육";
         if (/영화|CGV|롯데시네마|넷플릭스|유튜브|게임|스포츠|헬스/.test(n)) return "문화";
         if (/여행|호텔|항공|숙박|에어비앤비|펜션|리조트/.test(n)) return "여행";
         if (/백화점|아울렛|올리브영|다이소|무신사|배민|요기요|쇼핑/.test(n)) return "쇼핑";
-        if (/월세|관리비|전기|가스|수도|인터넷|통신|보험|아파트|SK텔레콤|KT|LG U/.test(n)) return "주거";
+        if (/월세|임대|아파트|보험/.test(n)) return "주거";
         return "기타";
       })();
 
@@ -1420,7 +1424,7 @@ export default function App() {
 
       {/* ── 거래 추가 모달 ── */}
       {showTxModal && (
-        <div className="overlay" onClick={()=>{}}>
+        <div className="overlay" onClick={()=>{setShowTxModal(false);setEditTxId(null);}}>
           <div className="sheet" onClick={e=>e.stopPropagation()}>
             <div style={{width:36,height:4,background:"#E5E0D5",borderRadius:4,margin:"0 auto 20px"}}/>
             <div style={{fontSize:17,fontWeight:700,marginBottom:16}}>{editTxId?"내역 수정":"내역 추가"}</div>
@@ -1440,9 +1444,9 @@ export default function App() {
                   {Object.entries(txForm.type==="income"?INCOME_CATEGORIES:EXPENSE_CATEGORIES).map(([k,v])=><option key={k} value={k}>{v.emoji} {k}</option>)}
                 </select></div>
               <div><label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>가족 멤버</label>
-                <select className="sel" value={txForm.member} onChange={e=>setTxForm({...txForm,member:e.target.value})}>
+                <select className="sel" value={String(txForm.member||"")} onChange={e=>setTxForm({...txForm,member:e.target.value})}>
                   <option value="">선택</option>
-                  {members.map(m=><option key={m.id} value={m.id}>{m.emoji} {m.name}</option>)}
+                  {members.map(m=><option key={m.id} value={String(m.id)}>{m.emoji} {m.name}</option>)}
                 </select></div>
             </div>
             <div style={{marginBottom:11}}>
