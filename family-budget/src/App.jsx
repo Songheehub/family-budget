@@ -549,6 +549,7 @@ export default function App() {
   const [txForm, setTxForm] = useState({date:now.toISOString().slice(0,10),type:"expense",amount:"",category:"식비",memo:"",member:"",accountId:"",cardId:""});
   const [editTxId, setEditTxId] = useState(null);
   const [lastMember, setLastMember] = useState("");
+  const [dashMember, setDashMember] = useState(null); // 대시보드 멤버 필터
   const [lastCardId, setLastCardId] = useState("");
   const [lastCardMemberId, setLastCardMemberId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -918,163 +919,145 @@ export default function App() {
       <div style={{maxWidth:600,margin:"0 auto",padding:"16px 13px 60px"}}>
 
         {/* ── 대시보드 ── */}
-        {tab==="dashboard" && (
+        {tab==="dashboard" && (()=>{
+          const activeMem = dashMember ? members.find(m=>m.id===dashMember) : null;
+          const dashTx = dashMember ? monthTx.filter(t=>t.member===dashMember) : monthTx;
+          const dashIncome  = dashTx.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
+          const dashExpense = dashTx.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+          const dashBalance = dashIncome - dashExpense;
+          const donutData = (() => {
+            const map={};
+            dashTx.filter(t=>t.type==="expense").forEach(t=>{ map[t.category]=(map[t.category]||0)+t.amount; });
+            return Object.entries(map).map(([name,value])=>({name,value,...(EXPENSE_CATEGORIES[name]||{})})).sort((a,b)=>b.value-a.value);
+          })();
+          return (
           <div className="up" style={{display:"flex",flexDirection:"column",gap:13}}>
-
             {/* 이번 달 수지 메인 카드 */}
             <div style={{background:"linear-gradient(135deg,#4A6FA5,#3257A0)",borderRadius:20,padding:"20px 22px",color:"white"}}>
-              <div style={{fontSize:11,opacity:.75,marginBottom:3}}>{thisMonthLabel} 수지</div>
-              <div style={{fontSize:32,fontWeight:700,marginBottom:4}}>{balance>=0?"+":""}{fmtShort(balance)}</div>
+              <div style={{fontSize:11,opacity:.75,marginBottom:2}}>
+                {thisMonthLabel} {activeMem ? `· ${activeMem.emoji} ${activeMem.name}` : "전체"}
+              </div>
+              <div style={{fontSize:32,fontWeight:700,marginBottom:3}}>{dashBalance>=0?"+":""}{fmtShort(dashBalance)}</div>
               <div style={{fontSize:12,opacity:.7,marginBottom:14}}>
-                저축률 {totalIncome ? Math.round((balance/totalIncome)*100) : 0}%
+                저축률 {dashIncome ? Math.round((dashBalance/dashIncome)*100) : 0}%
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                 <div style={{background:"rgba(255,255,255,.15)",borderRadius:12,padding:"10px 13px"}}>
                   <div style={{fontSize:11,opacity:.8,marginBottom:2}}>💚 수입</div>
-                  <div style={{fontSize:17,fontWeight:700}}>{fmtShort(totalIncome)}</div>
+                  <div style={{fontSize:17,fontWeight:700}}>{fmtShort(dashIncome)}</div>
                 </div>
                 <div style={{background:"rgba(255,255,255,.15)",borderRadius:12,padding:"10px 13px"}}>
                   <div style={{fontSize:11,opacity:.8,marginBottom:2}}>🔴 지출</div>
-                  <div style={{fontSize:17,fontWeight:700}}>{fmtShort(totalExpense)}</div>
+                  <div style={{fontSize:17,fontWeight:700}}>{fmtShort(dashExpense)}</div>
                 </div>
               </div>
             </div>
 
-            {/* 자산 요약 */}
-            <div className="card" style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div>
-                <div style={{fontSize:12,color:"#aaa",marginBottom:3}}>💎 총 가족 자산</div>
-                <div style={{fontSize:24,fontWeight:700}}>{fmtShort(totalAssetValue)}</div>
-                {assetCats.length > 0 && (
-                  <div style={{fontSize:11,color:"#bbb",marginTop:3}}>
-                    {assetCats.map(c=>`${c.emoji} ${c.label} ${fmtShort(catTotal(c))}`).join("  ·  ")}
-                  </div>
-                )}
-              </div>
-              <button onClick={()=>setShowAssetModal(true)} style={{background:"#EEF2F9",border:"none",borderRadius:10,padding:"8px 13px",color:"#4A6FA5",fontSize:13,fontWeight:600,cursor:"pointer",flexShrink:0}}>수정 ✏️</button>
+            {/* 멤버 필터 칩 */}
+            <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+              <button onClick={()=>setDashMember(null)} className="chip"
+                style={{border:`1.5px solid ${!dashMember?"#4A6FA5":"#E5E0D5"}`,background:!dashMember?"#EEF2F9":"white",color:!dashMember?"#4A6FA5":"#666"}}>
+                👨‍👩‍👧 전체
+              </button>
+              {members.filter(m=>m.id!==9999).map((m,i)=>(
+                <button key={m.id} onClick={()=>setDashMember(dashMember===m.id?null:m.id)} className="chip"
+                  style={{border:`1.5px solid ${dashMember===m.id?MEMBER_COLORS[i%6]:"#E5E0D5"}`,background:dashMember===m.id?MEMBER_COLORS[i%6]+"22":"white",color:dashMember===m.id?MEMBER_COLORS[i%6]:"#666"}}>
+                  {m.emoji} {m.name}
+                </button>
+              ))}
             </div>
 
-            {/* 멤버별 이번 달 수지 */}
-            {members.filter(m=>m.id!==9999).length > 0 && (
+            {/* 도넛차트 + 카테고리 리스트 */}
+            {donutData.length > 0 ? (
+              <div className="card">
+                <div style={{fontSize:13,fontWeight:700,marginBottom:4}}>
+                  📊 카테고리별 지출
+                  {activeMem && <span style={{fontSize:11,color:"#aaa",fontWeight:400,marginLeft:6}}>{activeMem.emoji} {activeMem.name}</span>}
+                </div>
+                <div style={{display:"flex",alignItems:"center"}}>
+                  <div style={{flexShrink:0}}>
+                    <ResponsiveContainer width={150} height={150}>
+                      <PieChart>
+                        <Pie data={donutData} cx="50%" cy="50%" innerRadius={42} outerRadius={68}
+                          dataKey="value" paddingAngle={2} startAngle={90} endAngle={-270}>
+                          {donutData.map((d,i)=><Cell key={i} fill={d.color||ASSET_COLORS[i%7]}/>)}
+                        </Pie>
+                        <Tooltip formatter={v=>fmt(v)} contentStyle={{borderRadius:10,border:"none",fontFamily:"inherit",fontSize:11}}/>
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div style={{flex:1,display:"flex",flexDirection:"column",gap:7,minWidth:0,paddingLeft:8}}>
+                    {donutData.slice(0,6).map((d,i)=>(
+                      <div key={d.name} style={{display:"flex",alignItems:"center",gap:6}}>
+                        <div style={{width:8,height:8,borderRadius:2,background:d.color||ASSET_COLORS[i%7],flexShrink:0}}/>
+                        <span style={{fontSize:12,color:"#555",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.emoji} {d.name}</span>
+                        <span style={{fontSize:12,fontWeight:600,color:"#333",whiteSpace:"nowrap"}}>{fmtShort(d.value)}</span>
+                        <span style={{fontSize:10,color:"#bbb",width:28,textAlign:"right"}}>{dashExpense?Math.round(d.value/dashExpense*100):0}%</span>
+                      </div>
+                    ))}
+                    {donutData.length > 6 && <div style={{fontSize:11,color:"#bbb"}}>외 {donutData.length-6}개</div>}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="card" style={{textAlign:"center",padding:"28px 0",color:"#bbb"}}>
+                <div style={{fontSize:28,marginBottom:8}}>📊</div>
+                <div style={{fontSize:13}}>이번 달 지출 내역이 없어요</div>
+              </div>
+            )}
+
+            {/* 전체 선택 시: 멤버별 수지 비교 */}
+            {!dashMember && members.filter(m=>m.id!==9999).length > 0 && (
               <div className="card">
                 <div style={{fontSize:13,fontWeight:700,marginBottom:14}}>👨‍👩‍👧 멤버별 이번 달</div>
                 {members.filter(m=>m.id!==9999).map((m,i)=>{
                   const inc = monthTx.filter(t=>t.type==="income"&&t.member===m.id).reduce((s,t)=>s+t.amount,0);
                   const exp = monthTx.filter(t=>t.type==="expense"&&t.member===m.id).reduce((s,t)=>s+t.amount,0);
                   const bal = inc - exp;
-                  const maxExp = Math.max(...members.filter(x=>x.id!==9999).map(x=>monthTx.filter(t=>t.type==="expense"&&t.member===x.id).reduce((s,t)=>s+t.amount,0)),1);
+                  const maxExp = Math.max(...members.filter(x=>x.id!==9999).map(x=>
+                    monthTx.filter(t=>t.type==="expense"&&t.member===x.id).reduce((s,t)=>s+t.amount,0)
+                  ),1);
                   return (
-                    <div key={m.id} style={{marginBottom:12}}>
-                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:5}}>
-                        <span style={{fontSize:19,width:28}}>{m.emoji}</span>
+                    <div key={m.id} style={{marginBottom:11,cursor:"pointer"}} onClick={()=>setDashMember(m.id)}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                        <span style={{fontSize:18,width:26,flexShrink:0}}>{m.emoji}</span>
                         <span style={{fontSize:13,fontWeight:600,flex:1}}>{m.name}</span>
-                        <span style={{fontSize:12,color:"#3BB273",marginRight:6}}>+{fmtShort(inc)}</span>
-                        <span style={{fontSize:12,color:"#E07A5F",marginRight:6}}>-{fmtShort(exp)}</span>
-                        <span style={{fontSize:13,fontWeight:700,color:bal>=0?"#3BB273":"#E07A5F",minWidth:55,textAlign:"right"}}>{bal>=0?"+":""}{fmtShort(bal)}</span>
+                        <span style={{fontSize:11,color:"#3BB273"}}>+{fmtShort(inc)}</span>
+                        <span style={{fontSize:11,color:"#E07A5F",margin:"0 4px"}}>-{fmtShort(exp)}</span>
+                        <span style={{fontSize:13,fontWeight:700,color:bal>=0?"#3BB273":"#E07A5F",minWidth:50,textAlign:"right"}}>{bal>=0?"+":""}{fmtShort(bal)}</span>
                       </div>
-                      <div style={{height:5,background:"#F0EBE0",borderRadius:3,marginLeft:38}}>
+                      <div style={{height:5,background:"#F0EBE0",borderRadius:3,marginLeft:34}}>
                         <div style={{height:"100%",width:`${Math.min(100,(exp/maxExp)*100)}%`,background:MEMBER_COLORS[i%6],borderRadius:3,transition:"width .4s"}}/>
                       </div>
                     </div>
                   );
                 })}
+                <div style={{fontSize:11,color:"#bbb",textAlign:"center",marginTop:2}}>멤버를 탭하면 상세 보기</div>
               </div>
             )}
 
-            {/* 카테고리별 지출 상세 */}
-            {categoryData.length > 0 && (
-              <div className="card">
-                <div style={{fontSize:13,fontWeight:700,marginBottom:14}}>📊 카테고리별 지출</div>
-                {categoryData.map((d,i)=>(
-                  <div key={d.name} style={{marginBottom:10}}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                      <span style={{fontSize:13,color:"#444"}}>{d.emoji} {d.name}</span>
-                      <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                        <span style={{fontSize:11,color:"#bbb"}}>{totalExpense?Math.round(d.value/totalExpense*100):0}%</span>
-                        <span style={{fontSize:13,fontWeight:600,color:d.color||"#E07A5F"}}>{fmtShort(d.value)}</span>
-                      </div>
-                    </div>
-                    <div style={{height:5,background:"#F0EBE0",borderRadius:3}}>
-                      <div style={{height:"100%",width:`${totalExpense?Math.min(100,d.value/totalExpense*100):0}%`,background:d.color||"#E07A5F",borderRadius:3,transition:"width .4s"}}/>
-                    </div>
+            {/* 자산 요약 */}
+            <div className="card" style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,color:"#aaa",marginBottom:3}}>💎 총 가족 자산</div>
+                <div style={{fontSize:22,fontWeight:700}}>{fmtShort(totalAssetValue)}</div>
+                {assetCats.length > 0 && (
+                  <div style={{fontSize:11,color:"#bbb",marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {assetCats.map(c=>`${c.emoji} ${c.label} ${fmtShort(catTotal(c))}`).join("  ·  ")}
                   </div>
-                ))}
+                )}
               </div>
-            )}
-
-            {/* 고정지출 이번 달 요약 */}
-            {recurringItems.filter(r=>r.active!==false).length > 0 && (
-              <div className="card" style={{padding:"14px 18px"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                  <div style={{fontSize:13,fontWeight:700}}>🔁 이번 달 고정지출</div>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <span style={{fontSize:11,background:recurringApplied?"#E8F5EE":"#FFF3E0",color:recurringApplied?"#3BB273":"#FF9F1C",padding:"3px 9px",borderRadius:20,fontWeight:600}}>
-                      {recurringApplied ? "✓ 자동 적용됨" : "⏳ 적용 대기"}
-                    </span>
-                    <button onClick={()=>setTab("recurring")} style={{background:"none",border:"none",color:"#4A6FA5",fontSize:12,cursor:"pointer",fontWeight:600}}>관리 →</button>
-                  </div>
-                </div>
-                <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                  {recurringItems.filter(r=>r.active!==false).slice(0,3).map(r=>{
-                    const cat = CATEGORIES[r.category];
-                    const isPast = (r.day||1) <= now.getDate();
-                    const isTransfer = r.type==="transfer";
-                    return (
-                      <div key={r.id} style={{display:"flex",alignItems:"center",gap:9,opacity:isPast?1:0.45}}>
-                        <span style={{fontSize:15}}>{isTransfer?"🔄":cat?.emoji||"📦"}</span>
-                        <span style={{fontSize:13,flex:1,color:"#444"}}>{r.memo}</span>
-                        <span style={{fontSize:13,fontWeight:600,color:isTransfer?"#4A6FA5":r.type==="income"?"#3BB273":"#E07A5F"}}>
-                          {isTransfer?"↔":r.type==="income"?"+":"-"}{fmtShort(r.amount)}
-                        </span>
-                        <span style={{fontSize:11,color:isPast?"#bbb":"#FF9F1C"}}>{r.day}일{!isPast?" (예정)":""}</span>
-                      </div>
-                    );
-                  })}
-                  {recurringItems.filter(r=>r.active!==false).length > 3 && (
-                    <div style={{fontSize:12,color:"#aaa",textAlign:"center",marginTop:2}}>외 {recurringItems.filter(r=>r.active!==false).length-3}개 더</div>
-                  )}
-                </div>
-                <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #F5F0E8",display:"flex",justifyContent:"space-between"}}>
-                  <span style={{fontSize:12,color:"#999"}}>이번 달 고정지출 합계</span>
-                  <span style={{fontSize:14,fontWeight:700,color:"#E07A5F"}}>{fmtShort(recurringItems.filter(r=>r.active!==false&&r.type==="expense"&&(r.day||1)<=now.getDate()).reduce((s,r)=>s+r.amount,0))}</span>
-                </div>
-              </div>
-            )}
-
-            {/* 최근 내역 */}
-            {transactions.length > 0 && (
-              <div className="card" style={{padding:0,overflow:"hidden"}}>
-                <div style={{padding:"14px 18px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div style={{fontSize:13,fontWeight:700}}>🕐 최근 내역</div>
-                  <button onClick={()=>setTab("transactions")} style={{background:"none",border:"none",color:"#4A6FA5",fontSize:12,cursor:"pointer",fontWeight:600}}>전체 보기 →</button>
-                </div>
-                {[...transactions].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5).map(t=>{
-                  const cat=CATEGORIES[t.category];
-                  const mem=members.find(m=>m.id===t.member);
-                  const allAccounts=assetCats.flatMap(c=>c.accounts);
-                  if(t.isTransfer&&t.isTransferIn) return null;
-                  return (
-                    <div key={t.id} className="tx-row">
-                      <div style={{width:34,height:34,borderRadius:10,background:t.isTransfer?"#EEF2F9":cat?.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17}}>
-                        {t.isTransfer?"🔄":cat?.emoji}
-                      </div>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:13,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.memo}</div>
-                        <div style={{fontSize:11,color:"#aaa",marginTop:1}}>{t.date} · {mem?.emoji}{mem?.name}</div>
-                      </div>
-                      <div style={{fontSize:13,fontWeight:700,color:t.isTransfer?"#4A6FA5":t.type==="income"?"#3BB273":"#E07A5F",whiteSpace:"nowrap"}}>
-                        {t.isTransfer?"↔":t.type==="income"?"+":"-"}{fmtShort(t.amount)}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+              <button onClick={()=>setShowAssetModal(true)}
+                style={{background:"#EEF2F9",border:"none",borderRadius:10,padding:"8px 13px",color:"#4A6FA5",fontSize:13,fontWeight:600,cursor:"pointer",flexShrink:0,marginLeft:12}}>
+                수정 ✏️
+              </button>
+            </div>
 
           </div>
-        )}
+          );
+        })()}
 
-        {/* ── 자산 탭 ── */}
+                {/* ── 자산 탭 ── */}
         {tab==="assets" && (
           <div className="up" style={{display:"flex",flexDirection:"column",gap:13}}>
             <div className="card" style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -1086,7 +1069,7 @@ export default function App() {
             </div>
 
             {assetCats.map((cat,ci)=>{
-              const expanded = expandedCat[cat.id] !== false;
+              const expanded = expandedCat[cat.id] === true;
               return (
                 <div key={cat.id} className="card" style={{padding:0,overflow:"hidden"}}>
                   <div onClick={()=>setExpandedCat(p=>({...p,[cat.id]:!expanded}))}
@@ -1207,15 +1190,15 @@ export default function App() {
                   <div style={{fontSize:14,fontWeight:700,marginBottom:12}}>자산 변동 추이</div>
 
                   {/* 뷰 토글 */}
-                  <div style={{display:"flex",gap:7,marginBottom:10,flexWrap:"wrap"}}>
+                  <div style={{display:"flex",gap:7,marginBottom:10}}>
                     <div className="tt" style={{flex:"none",marginBottom:0}}>
                       {[["category","📊 카테고리"],["account","🏦 통장별"]].map(([v,l])=>(
-                        <button key={v} className={`tb ${chartView===v?"on":""}`} onClick={()=>setChartView(v)} style={{color:chartView===v?"#4A6FA5":"#999",fontSize:12,padding:"7px 10px"}}>{l}</button>
+                        <button key={v} className={`tb ${chartView===v?"on":""}`} onClick={()=>setChartView(v)} style={{color:chartView===v?"#4A6FA5":"#999",fontSize:12,padding:"7px 10px",whiteSpace:"nowrap"}}>{l}</button>
                       ))}
                     </div>
                     <div className="tt" style={{flex:"none",marginBottom:0}}>
                       {[["daily","일별"],["monthly","월별"],["yearly","연도별"]].map(([v,l])=>(
-                        <button key={v} className={`tb ${chartPeriod===v?"on":""}`} onClick={()=>setChartPeriod(v)} style={{color:chartPeriod===v?"#4A6FA5":"#999",fontSize:12,padding:"7px 10px"}}>{l}</button>
+                        <button key={v} className={`tb ${chartPeriod===v?"on":""}`} onClick={()=>setChartPeriod(v)} style={{color:chartPeriod===v?"#4A6FA5":"#999",fontSize:12,padding:"7px 10px",whiteSpace:"nowrap"}}>{l}</button>
                       ))}
                     </div>
                   </div>
@@ -1774,14 +1757,38 @@ export default function App() {
             <div style={{width:36,height:4,background:"#E5E0D5",borderRadius:4,margin:"0 auto 20px"}}/>
             <div style={{fontSize:17,fontWeight:700,marginBottom:18}}>⚙️ 설정</div>
             <div style={{marginBottom:20}}>
-              <div style={{fontSize:13,fontWeight:600,color:"#555",marginBottom:10}}>가족 구성원 이름 수정</div>
-              {members.filter(m=>m.id!==9999).map(m=>(
+              <div style={{fontSize:13,fontWeight:600,color:"#555",marginBottom:10}}>가족 구성원 관리</div>
+              {members.filter(m=>m.id!==9999).map((m,i)=>(
                 <div key={m.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 13px",background:"#FAFAF7",borderRadius:10,marginBottom:7}}>
                   <span style={{fontSize:19}}>{m.emoji}</span>
                   <input className="inp" style={{background:"transparent",border:"none",padding:0,flex:1,fontWeight:500}} value={m.name}
                     onChange={e=>setSetup(s=>({...s,members:s.members.map(x=>x.id===m.id?{...x,name:e.target.value}:x)}))}/>
+                  {members.filter(x=>x.id!==9999).length > 1 && (
+                    <button onClick={()=>setSetup(s=>({...s,members:s.members.filter(x=>x.id!==m.id)}))}
+                      style={{background:"#FFF0EE",border:"none",borderRadius:8,padding:"5px 10px",color:"#E07A5F",fontSize:12,cursor:"pointer"}}>삭제</button>
+                  )}
                 </div>
               ))}
+              <div style={{display:"flex",gap:8,marginTop:8}}>
+                <input className="inp" placeholder="이름 입력" id="newMemberInput"
+                  onKeyDown={e=>{
+                    if(e.key==="Enter"&&e.target.value.trim()){
+                      const name=e.target.value.trim();
+                      const idx=members.filter(x=>x.id!==9999).length;
+                      setSetup(s=>({...s,members:[...s.members,{id:Date.now(),name,emoji:MEMBER_EMOJIS[idx%MEMBER_EMOJIS.length]}]}));
+                      e.target.value="";
+                    }
+                  }}
+                  style={{flex:1}}/>
+                <button onClick={()=>{
+                  const inp=document.getElementById("newMemberInput");
+                  if(!inp||!inp.value.trim()) return;
+                  const name=inp.value.trim();
+                  const idx=members.filter(x=>x.id!==9999).length;
+                  setSetup(s=>({...s,members:[...s.members,{id:Date.now(),name,emoji:MEMBER_EMOJIS[idx%MEMBER_EMOJIS.length]}]}));
+                  inp.value="";
+                }} style={{background:"#EEF2F9",border:"none",borderRadius:9,padding:"0 16px",fontSize:18,cursor:"pointer",color:"#4A6FA5",flexShrink:0,height:42}}>+</button>
+              </div>
             </div>
 
             {/* 카드 관리 */}
