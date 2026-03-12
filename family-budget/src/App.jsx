@@ -7,7 +7,8 @@ const EXPENSE_CATEGORIES = {
   식비:       { emoji: "🍱", color: "#E07A5F" },
   장보기:     { emoji: "🛒", color: "#FF9F1C" },
   "카페·디저트": { emoji: "☕", color: "#A0785A" },
-  의료:       { emoji: "💊", color: "#81B29A" },
+  건강:       { emoji: "💊", color: "#81B29A" },
+  교통:       { emoji: "🚗", color: "#F4845F" },
   통신:       { emoji: "📱", color: "#5C85D6" },
   공과금:     { emoji: "🔌", color: "#6DBF9E" },
   교육:       { emoji: "📚", color: "#F2CC8F" },
@@ -256,7 +257,7 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
   const [inputMode, setInputMode] = useState("text"); // "text" | "csv"
   const fileRef = useRef();
 
-  const EXPENSE_CATEGORIES = ["식비","장보기","카페·디저트","의료","통신","공과금","교육","문화","쇼핑","여행","용돈","주거","기타"];
+  const EXPENSE_CATEGORIES = ["식비","장보기","카페·디저트","건강","교통","통신","공과금","교육","문화","쇼핑","여행","용돈","주거","기타"];
 
   const parseWithAI = async (content) => {
     setParsing(true); setParseError("");
@@ -329,7 +330,7 @@ ${content.slice(0, 8000)}`}]
     // 컬럼 인덱스 찾기
     const dateCol = headers.findIndex(h => /날짜|이용일|승인일|거래일|결제일/.test(h));
     const amtCol  = headers.findIndex(h => /이용금액|승인금액|거래금액|결제금액|금액/.test(h));
-    const memoCol = headers.findIndex(h => /가맹점|상호|이용처|내용|거래처|업종명/.test(h));
+    const memoCol = headers.findIndex(h => /가맹점|이용가맹점|상호|이용처|내용|거래처|업종명/.test(h));
 
     if (dateCol === -1 || amtCol === -1) return [];
 
@@ -344,7 +345,9 @@ ${content.slice(0, 8000)}`}]
       const dm  = dateRaw.match(/(\d{4})[.\-\/](\d{1,2})[.\-\/](\d{1,2})/);
       const dm3 = dateRaw.match(/^(\d{4})(\d{2})(\d{2})$/);
       const dm2 = dateRaw.match(/^(\d{2})(\d{2})(\d{2})$/);
-      if (dm)  date = `${dm[1]}-${dm[2].padStart(2,"0")}-${dm[3].padStart(2,"0")}`;
+      const dmK = dateRaw.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/); // 현대카드: "2026년 02월 01일"
+      if (dmK) date = `${dmK[1]}-${dmK[2].padStart(2,"0")}-${dmK[3].padStart(2,"0")}`;
+      else if (dm)  date = `${dm[1]}-${dm[2].padStart(2,"0")}-${dm[3].padStart(2,"0")}`;
       else if (dm3) date = `${dm3[1]}-${dm3[2]}-${dm3[3]}`;
       else if (dm2) date = `20${dm2[1]}-${dm2[2]}-${dm2[3]}`;
 
@@ -361,7 +364,8 @@ ${content.slice(0, 8000)}`}]
         if (/스타벅스|커피|베이커리|맥도날드|버거킹|롯데리아|피자|치킨|식당|음식|한식|중식|일식|분식|김밥|도시락/.test(n)) return "식비";
         if (/카페|디저트|케이크|마카롱|빵|파리바게|뚜레쥬르|이디야|투썸|할리스|폴바셋/.test(n)) return "카페·디저트";
         if (/마트|이마트|홈플러스|롯데마트|코스트코|GS25|CU|세븐|편의점|농협|하나로/.test(n)) return "장보기";
-        if (/병원|의원|약국|클리닉|치과|한의원|건강/.test(n)) return "의료";
+        if (/병원|의원|약국|클리닉|치과|한의원|건강|헬스|피트니스|요가/.test(n)) return "건강";
+        if (/택시|버스|지하철|기차|KTX|고속도로|하이패스|주유|주차|카카오택시|우버/.test(n)) return "교통";
         if (/SK텔레콤|KT|LG U\+|통신|휴대폰|인터넷|알뜰폰/.test(n)) return "통신";
         if (/전기|가스|수도|관리비|공과금|한국전력|도시가스/.test(n)) return "공과금";
         if (/학원|교육|문구|학습|어린이|유치원|학교/.test(n)) return "교육";
