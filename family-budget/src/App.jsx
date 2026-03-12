@@ -29,6 +29,10 @@ const ASSET_COLORS = ["#4A6FA5","#81B29A","#F2CC8F","#E07A5F","#C77DFF","#FF9F1C
 const ASSET_EMOJIS = ["🏦","📈","🏠","💳","💎","🏧","💵"];
 
 const fmt = (n) => (n||0).toLocaleString() + "원";
+const cardLabel = (card, members) => {
+  const mem = members?.find(m => m.id === card.memberId);
+  return mem ? `${card.name}(${mem.name})` : card.name;
+};
 const fmtShort = (n) => {
   if (!n) return "0원";
   const trim = (v) => parseFloat(v.toFixed(4)).toString();
@@ -244,10 +248,10 @@ function CardAddForm({ members, onAdd }) {
 }
 
 // ── 카드 일괄 입력 모달 ──
-function BulkCardModal({ cards, members, assetCats, today, onSave, onClose }) {
-  const [step, setStep] = useState("input"); // input | confirm
-  const [cardId, setCardId] = useState(String(cards[0]?.id||""));
-  const [memberId, setMemberId] = useState(String(members[0]?.id||""));
+function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaultMemberId, onSave, onClose }) {
+  const [step, setStep] = useState("input");
+  const [cardId, setCardId] = useState(defaultCardId || String(cards[0]?.id||""));
+  const [memberId, setMemberId] = useState(defaultMemberId || String(members[0]?.id||""));
   const [rawText, setRawText] = useState("");
   const [parsed, setParsed] = useState([]);
   const [parsing, setParsing] = useState(false);
@@ -409,11 +413,11 @@ ${content.slice(0, 8000)}`}]
       cardId: cardId,
       accountId: "",
     }));
-    onSave(txs);
+    onSave(txs, cardId, memberId);
   };
 
   return (
-    <div className="overlay" onClick={onClose}>
+    <div className="overlay">
       <div className="sheet" style={{maxHeight:"85vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
         <div style={{width:36,height:4,background:"#E5E0D5",borderRadius:4,margin:"0 auto 18px"}}/>
         <div style={{fontSize:17,fontWeight:700,marginBottom:4}}>💳 카드내역 일괄 입력</div>
@@ -424,7 +428,7 @@ ${content.slice(0, 8000)}`}]
             <div style={{flex:1}}>
               <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>카드</label>
               <select className="sel" value={cardId} onChange={e=>setCardId(e.target.value)}>
-                {cards.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                {cards.map(c=><option key={c.id} value={c.id}>{cardLabel(c, members)}</option>)}
               </select>
             </div>
             <div style={{flex:1}}>
@@ -542,6 +546,9 @@ export default function App() {
   const [recurringApplied, setRecurringApplied] = useState(false);
   const [rForm, setRForm] = useState({memo:"",amount:"",category:"식비",type:"expense",day:1,member:"",accountId:"",toAccountId:""});
   const [txForm, setTxForm] = useState({date:now.toISOString().slice(0,10),type:"expense",amount:"",category:"식비",memo:"",member:"",accountId:"",cardId:""});
+  const [editTxId, setEditTxId] = useState(null); // 수정 중인 내역 id
+  const [lastCardId, setLastCardId] = useState("");
+  const [lastCardMemberId, setLastCardMemberId] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
@@ -816,18 +823,25 @@ export default function App() {
   const addTx = () => {
     if (!txForm.amount || !txForm.memo || !txForm.member) return;
     const amt = parseInt(txForm.amount);
-    const tx = { id: Date.now(), ...txForm, amount: amt, member: parseInt(txForm.member) };
-    setTransactions(prev => [...prev, tx]);
-    // 카드 결제면 통장 잔액 변동 없음
-    if (txForm.accountId && !txForm.cardId) {
-      const delta = txForm.type === "income" ? amt : -amt;
-      setSetup(s => {
-        const newCats = adjustAccount(s.assetCats, txForm.accountId, delta);
-        const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
-        return { ...s, assetCats: newCats, assetHistory, accountHistory };
-      });
+    if (editTxId) {
+      // 수정 모드: 기존 내역 교체 (통장 잔액은 건드리지 않음)
+      setTransactions(prev => prev.map(x => x.id === editTxId ? { ...x, ...txForm, amount: amt, member: parseInt(txForm.member) } : x));
+      setEditTxId(null);
+    } else {
+      // 신규 추가
+      const tx = { id: Date.now(), ...txForm, amount: amt, member: parseInt(txForm.member) };
+      setTransactions(prev => [...prev, tx]);
+      if (txForm.accountId && !txForm.cardId) {
+        const delta = txForm.type === "income" ? amt : -amt;
+        setSetup(s => {
+          const newCats = adjustAccount(s.assetCats, txForm.accountId, delta);
+          const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
+          return { ...s, assetCats: newCats, assetHistory, accountHistory };
+        });
+      }
     }
     setShowTxModal(false);
+    setLastMember(txForm.member);
     setTxForm(f => ({ ...f, amount: "", memo: "", accountId: "", cardId: "" }));
   };
 
@@ -878,7 +892,10 @@ export default function App() {
             <button style={{background:"#F0EBE0",border:"none",borderRadius:10,padding:"8px 11px",fontSize:15,cursor:"pointer"}} onClick={()=>setShowSettingsModal(true)}>⚙️</button>
             <button className="btn-g" style={{padding:"8px 13px",fontSize:13}} onClick={()=>setShowTransferModal(true)}>🔄 이체</button>
             {cards.length>0 && <button className="btn-g" style={{padding:"8px 13px",fontSize:13}} onClick={()=>setShowBulkCardModal(true)}>💳 일괄</button>}
-            <button className="btn-b" style={{padding:"8px 15px"}} onClick={()=>setShowTxModal(true)}>+ 추가</button>
+            <button className="btn-b" style={{padding:"8px 15px"}} onClick={()=>{
+              setTxForm(f=>({...f, member:lastMember, date:now.toISOString().slice(0,10)}));
+              setShowTxModal(true);
+            }}>+ 추가</button>
           </div>
         </div>
       </div>
@@ -1061,8 +1078,7 @@ export default function App() {
                     <div key={card.id} style={{display:"flex",alignItems:"center",gap:12,padding:"13px 18px",borderBottom:"1px solid #F5F0E8"}}>
                       <div style={{width:38,height:38,borderRadius:11,background:"#FFF0EE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>💳</div>
                       <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:14,fontWeight:500}}>{card.name}</div>
-                        <div style={{fontSize:11,color:"#aaa",marginTop:2}}>{mem?`${mem.emoji} ${mem.name}`:""}</div>
+                        <div style={{fontSize:14,fontWeight:500}}>{cardLabel(card, members)}</div>
                       </div>
                       <div style={{textAlign:"right",marginRight:8}}>
                         <div style={{fontSize:15,fontWeight:700,color:bal>0?"#E07A5F":"#aaa"}}>{fmtShort(bal)}</div>
@@ -1235,12 +1251,17 @@ export default function App() {
                       <div style={{fontSize:11,color:"#aaa",marginTop:2}}>
                         {t.date} · {isTransfer
                           ? `${fromAcc?.name||"?"} → ${toAcc?.name||"?"}`
-                          : `${t.category} · ${mem?.emoji}${mem?.name}${t.cardId ? ` · 💳 ${cards.find(c=>String(c.id)===String(t.cardId))?.name||"카드"}` : t.accountId?` · 💳 ${allAccounts.find(a=>String(a.id)===String(t.accountId))?.name||""}`:""}${t.isCardSettle?" · 카드 정산":""}`}
+                          : `${t.category} · ${mem?.emoji}${mem?.name}${t.cardId ? ` · 💳 ${cardLabel(cards.find(c=>String(c.id)===String(t.cardId))||{name:"카드"}, members)}` : t.accountId?` · 💳 ${allAccounts.find(a=>String(a.id)===String(t.accountId))?.name||""}`:""}${t.isCardSettle?" · 카드 정산":""}`}
                       </div>
                     </div>
                     <div style={{fontSize:14,fontWeight:700,color:isTransfer?"#4A6FA5":t.type==="income"?"#3BB273":"#E07A5F",whiteSpace:"nowrap",marginRight:5}}>
                       {isTransfer?`↔ ${fmtShort(t.amount)}`:t.type==="income"?`+${fmtShort(t.amount)}`:`-${fmtShort(t.amount)}`}
                     </div>
+                    <button onClick={()=>{
+                      setEditTxId(t.id);
+                      setTxForm({...t, amount:String(t.amount), member:String(t.member), cardId:t.cardId||"", accountId:t.accountId||""});
+                      setShowTxModal(true);
+                    }} style={{background:"none",border:"none",color:"#ccc",fontSize:13,cursor:"pointer",padding:4}}>✏️</button>
                     <button onClick={()=>deleteTx(t)} style={{background:"none",border:"none",color:"#ddd",fontSize:13,cursor:"pointer",padding:4}}>✕</button>
                   </div>
                 );
@@ -1401,10 +1422,10 @@ export default function App() {
 
       {/* ── 거래 추가 모달 ── */}
       {showTxModal && (
-        <div className="overlay" onClick={()=>setShowTxModal(false)}>
+        <div className="overlay" onClick={()=>{setShowTxModal(false);setEditTxId(null);}}>
           <div className="sheet" onClick={e=>e.stopPropagation()}>
             <div style={{width:36,height:4,background:"#E5E0D5",borderRadius:4,margin:"0 auto 20px"}}/>
-            <div style={{fontSize:17,fontWeight:700,marginBottom:16}}>내역 추가</div>
+            <div style={{fontSize:17,fontWeight:700,marginBottom:16}}>{editTxId?"내역 수정":"내역 추가"}</div>
             <div className="tt">
               <button className={`tb ${txForm.type==="expense"?"on":""}`} onClick={()=>setTxForm({...txForm,type:"expense",category:"식비"})} style={{color:txForm.type==="expense"?"#E07A5F":"#999"}}>🔴 지출</button>
               <button className={`tb ${txForm.type==="income"?"on":""}`} onClick={()=>setTxForm({...txForm,type:"income",category:"급여"})} style={{color:txForm.type==="income"?"#3BB273":"#999"}}>💚 수입</button>
@@ -1438,7 +1459,7 @@ export default function App() {
               )}
               {txForm.cardId ? (
                 <select className="sel" value={txForm.cardId} onChange={e=>setTxForm({...txForm,cardId:e.target.value,accountId:""})}>
-                  {cards.map(c=>{const mem=members.find(m=>m.id===c.memberId); return <option key={c.id} value={c.id}>{c.name}{mem?` (${mem.name})`:""}</option>;})}
+                  {cards.map(c=><option key={c.id} value={c.id}>{cardLabel(c, members)}</option>)}
                 </select>
               ) : (
                 <select className="sel" value={txForm.accountId} onChange={e=>setTxForm({...txForm,accountId:e.target.value})}>
@@ -1453,13 +1474,13 @@ export default function App() {
                   {txForm.type==="income" ? "▲ 저장 시 잔액이 늘어납니다" : "▼ 저장 시 잔액이 줄어듭니다"}
                 </div>
               )}
-              {txForm.cardId && <div style={{fontSize:11,color:"#FF9F1C",marginTop:5,paddingLeft:4}}>💳 카드값으로 누적돼요 (정산 전까지 통장 잔액 변동 없음)</div>}
+              {txForm.cardId && <div style={{fontSize:11,color:"#FF9F1C",marginTop:5,paddingLeft:4}}>💳 카드값 누적 · 아래에서 실제 사용한 멤버도 선택해주세요</div>}
             </div>
             <div style={{marginBottom:20}}><label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>메모</label>
               <input className="inp" placeholder="내역을 입력하세요" value={txForm.memo} onChange={e=>setTxForm({...txForm,memo:e.target.value})}/></div>
             <div style={{display:"flex",gap:10}}>
-              <button className="btn-g" style={{flex:1}} onClick={()=>setShowTxModal(false)}>취소</button>
-              <button className="btn-b" style={{flex:2}} onClick={addTx}>추가하기</button>
+              <button className="btn-g" style={{flex:1}} onClick={()=>{setShowTxModal(false);setEditTxId(null);}}>취소</button>
+              <button className="btn-b" style={{flex:2}} onClick={addTx}>{editTxId?"수정 완료":"추가하기"}</button>
             </div>
           </div>
         </div>
@@ -1469,8 +1490,12 @@ export default function App() {
       {showBulkCardModal && <BulkCardModal
           cards={cards} members={members} assetCats={assetCats}
           today={now.toISOString().slice(0,10)}
-          onSave={(txs)=>{
+          defaultCardId={lastCardId}
+          defaultMemberId={lastCardMemberId}
+          onSave={(txs, cardId, memberId)=>{
             setTransactions(prev=>[...prev, ...txs]);
+            setLastCardId(cardId);
+            setLastCardMemberId(memberId);
             setShowBulkCardModal(false);
           }}
           onClose={()=>setShowBulkCardModal(false)}
@@ -1686,8 +1711,7 @@ export default function App() {
                   <div key={card.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 13px",background:"#FAFAF7",borderRadius:10,marginBottom:7}}>
                     <span style={{fontSize:18}}>💳</span>
                     <div style={{flex:1}}>
-                      <div style={{fontSize:13,fontWeight:500}}>{card.name}</div>
-                      {mem && <div style={{fontSize:11,color:"#aaa"}}>{mem.emoji} {mem.name}</div>}
+                      <div style={{fontSize:13,fontWeight:500}}>{cardLabel(card, members)}</div>
                     </div>
                     <button onClick={()=>setSetup(s=>({...s, cards:(s.cards||[]).filter((_,i)=>i!==idx)}))}
                       style={{background:"#FFF0EE",border:"none",borderRadius:8,padding:"5px 10px",color:"#E07A5F",fontSize:12,cursor:"pointer"}}>삭제</button>
