@@ -552,6 +552,7 @@ export default function App() {
   const [lastMember, setLastMember] = useState("");
   const [dashMembers, setDashMembers] = useState([]); // 대시보드 멤버 필터 (복수)
   const [dashMonthOffset, setDashMonthOffset] = useState(0);
+  const [selectedDashCat, setSelectedDashCat] = useState(null);
   const [lastCardId, setLastCardId] = useState("");
   const [lastCardMemberId, setLastCardMemberId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -1038,25 +1039,64 @@ export default function App() {
                     <ResponsiveContainer width={150} height={150}>
                       <PieChart>
                         <Pie data={donutData} cx="50%" cy="50%" innerRadius={42} outerRadius={68}
-                          dataKey="value" paddingAngle={2} startAngle={90} endAngle={-270}>
-                          {donutData.map((d,i)=><Cell key={i} fill={d.color||ASSET_COLORS[i%7]}/>)}
+                          dataKey="value" paddingAngle={2} startAngle={90} endAngle={-270}
+                          onClick={(d)=>setSelectedDashCat(prev=>prev===d.name?null:d.name)}>
+                          {donutData.map((d,i)=>(
+                            <Cell key={i} fill={d.color||ASSET_COLORS[i%7]}
+                              opacity={selectedDashCat&&selectedDashCat!==d.name?0.3:1}
+                              style={{cursor:"pointer"}}/>
+                          ))}
                         </Pie>
                         <Tooltip formatter={v=>fmt(v)} contentStyle={{borderRadius:10,border:"none",fontFamily:"inherit",fontSize:11}}/>
                       </PieChart>
                     </ResponsiveContainer>
                   </div>
                   <div style={{flex:1,display:"flex",flexDirection:"column",gap:7,minWidth:0,paddingLeft:8}}>
-                    {donutData.slice(0,6).map((d,i)=>(
-                      <div key={d.name} style={{display:"flex",alignItems:"center",gap:6}}>
-                        <div style={{width:8,height:8,borderRadius:2,background:d.color||ASSET_COLORS[i%7],flexShrink:0}}/>
-                        <span style={{fontSize:12,color:"#555",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.emoji} {d.name}</span>
-                        <span style={{fontSize:12,fontWeight:600,color:"#333",whiteSpace:"nowrap"}}>{fmtShort(d.value)}</span>
-                        <span style={{fontSize:10,color:"#bbb",width:28,textAlign:"right"}}>{dashExpense?Math.round(d.value/dashExpense*100):0}%</span>
-                      </div>
-                    ))}
+                    {donutData.slice(0,6).map((d,i)=>{
+                      const isSelected = selectedDashCat === d.name;
+                      return (
+                        <div key={d.name} onClick={()=>setSelectedDashCat(prev=>prev===d.name?null:d.name)}
+                          style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",opacity:selectedDashCat&&!isSelected?0.35:1,
+                            borderRadius:7,padding:"2px 4px",background:isSelected?(d.color||ASSET_COLORS[i%7])+"18":"transparent",
+                            transition:"all .2s"}}>
+                          <div style={{width:8,height:8,borderRadius:2,background:d.color||ASSET_COLORS[i%7],flexShrink:0}}/>
+                          <span style={{fontSize:12,color:"#555",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.emoji} {d.name}</span>
+                          <span style={{fontSize:12,fontWeight:600,color:"#333",whiteSpace:"nowrap"}}>{fmtShort(d.value)}</span>
+                          <span style={{fontSize:10,color:"#bbb",width:28,textAlign:"right"}}>{dashExpense?Math.round(d.value/dashExpense*100):0}%</span>
+                        </div>
+                      );
+                    })}
                     {donutData.length > 6 && <div style={{fontSize:11,color:"#bbb"}}>외 {donutData.length-6}개</div>}
                   </div>
                 </div>
+
+                {/* 선택 카테고리 내역 리스트 */}
+                {selectedDashCat && (() => {
+                  const catTxs = dashTx.filter(t=>t.type==="expense"&&t.category===selectedDashCat)
+                    .sort((a,b)=>b.date.localeCompare(a.date));
+                  const catInfo = EXPENSE_CATEGORIES[selectedDashCat]||{};
+                  return (
+                    <div style={{marginTop:14,borderTop:"1px solid #F5F0E8",paddingTop:12}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                        <span style={{fontSize:12,fontWeight:600,color:"#555"}}>{catInfo.emoji} {selectedDashCat} 내역 ({catTxs.length}건)</span>
+                        <button onClick={()=>setSelectedDashCat(null)}
+                          style={{background:"none",border:"none",color:"#bbb",fontSize:14,cursor:"pointer",lineHeight:1}}>✕</button>
+                      </div>
+                      {catTxs.map(t=>{
+                        const mem=members.find(m=>m.id===t.member);
+                        return (
+                          <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #F8F4EF"}}>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:13,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.memo}</div>
+                              <div style={{fontSize:11,color:"#bbb",marginTop:1}}>{t.date} · {mem?.emoji}{mem?.name}{t.cardId&&` · 💳${cards.find(c=>c.id===t.cardId)?.name||""}`}</div>
+                            </div>
+                            <span style={{fontSize:13,fontWeight:700,color:"#E07A5F",whiteSpace:"nowrap"}}>-{fmt(t.amount)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
             ) : (
               <div className="card" style={{textAlign:"center",padding:"28px 0",color:"#bbb"}}>
@@ -1581,8 +1621,8 @@ export default function App() {
 
       {/* ── 거래 추가 모달 ── */}
       {showTxModal && (
-        <div className="overlay" onClick={e=>e.target===e.currentTarget&&(setShowTxModal(false),setEditTxId(null))}>
-          <div className="sheet" onClick={e=>e.stopPropagation()}>
+        <div className="overlay">
+          <div className="sheet">
             <div style={{width:36,height:4,background:"#E5E0D5",borderRadius:4,margin:"0 auto 20px"}}/>
             <div style={{fontSize:17,fontWeight:700,marginBottom:16}}>{editTxId?"내역 수정":"내역 추가"}</div>
             <div className="tt">
