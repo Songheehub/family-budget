@@ -10,6 +10,7 @@ const EXPENSE_CATEGORIES = {
   교육:   { emoji: "📚", color: "#F2CC8F" },
   문화:   { emoji: "🎭", color: "#C77DFF" },
   쇼핑:   { emoji: "🛍️", color: "#4A6FA5" },
+  여행:   { emoji: "✈️", color: "#4A90D9" },
   용돈:   { emoji: "💸", color: "#2EC4B6" },
   주거:   { emoji: "🏠", color: "#3BB273" },
   기타:   { emoji: "📦", color: "#aaa" },
@@ -33,14 +34,7 @@ const cardLabel = (card, members) => {
   const mem = members?.find(m => m.id === card.memberId);
   return mem ? `${card.name}(${mem.name})` : card.name;
 };
-const fmtShort = (n) => {
-  if (!n) return "0원";
-  const trim = (v) => parseFloat(v.toFixed(4)).toString();
-  if (n >= 100000000) return `${trim(n/100000000)}억`;
-  if (n >= 10000000) return `${trim(n/10000000)}천만`;
-  if (n >= 10000) return `${trim(n/10000)}만`;
-  return `${n.toLocaleString()}원`;
-};
+const fmtShort = (n) => fmt(n);
 
 const now = new Date();
 const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
@@ -259,7 +253,7 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
   const [inputMode, setInputMode] = useState("text"); // "text" | "csv"
   const fileRef = useRef();
 
-  const EXPENSE_CATEGORIES = ["식비","장보기","의료","교육","문화","쇼핑","용돈","주거","기타"];
+  const EXPENSE_CATEGORIES = ["식비","장보기","의료","교육","문화","쇼핑","여행","용돈","주거","기타"];
 
   const parseWithAI = async (content) => {
     setParsing(true); setParseError("");
@@ -365,7 +359,8 @@ ${content.slice(0, 8000)}`}]
         if (/마트|이마트|홈플러스|롯데마트|코스트코|GS25|CU|세븐|편의점|농협|하나로/.test(n)) return "장보기";
         if (/병원|의원|약국|클리닉|치과|한의원|건강/.test(n)) return "의료";
         if (/학원|교육|문구|학습|어린이|유치원|학교/.test(n)) return "교육";
-        if (/영화|CGV|롯데시네마|넷플릭스|유튜브|게임|스포츠|헬스|여행|호텔/.test(n)) return "문화";
+        if (/영화|CGV|롯데시네마|넷플릭스|유튜브|게임|스포츠|헬스/.test(n)) return "문화";
+        if (/여행|호텔|항공|숙박|에어비앤비|펜션|리조트/.test(n)) return "여행";
         if (/백화점|아울렛|올리브영|다이소|무신사|배민|요기요|쇼핑/.test(n)) return "쇼핑";
         if (/월세|관리비|전기|가스|수도|인터넷|통신|보험|아파트|SK텔레콤|KT|LG U/.test(n)) return "주거";
         return "기타";
