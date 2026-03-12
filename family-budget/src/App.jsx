@@ -4,16 +4,17 @@ import { db } from "./firebase";
 import { doc, getDoc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 
 const EXPENSE_CATEGORIES = {
-  식비:   { emoji: "🍱", color: "#E07A5F" },
-  장보기: { emoji: "🛒", color: "#FF9F1C" },
-  의료:   { emoji: "💊", color: "#81B29A" },
-  교육:   { emoji: "📚", color: "#F2CC8F" },
-  문화:   { emoji: "🎭", color: "#C77DFF" },
-  쇼핑:   { emoji: "🛍️", color: "#4A6FA5" },
-  여행:   { emoji: "✈️", color: "#4A90D9" },
-  용돈:   { emoji: "💸", color: "#2EC4B6" },
-  주거:   { emoji: "🏠", color: "#3BB273" },
-  기타:   { emoji: "📦", color: "#aaa" },
+  식비:       { emoji: "🍱", color: "#E07A5F" },
+  장보기:     { emoji: "🛒", color: "#FF9F1C" },
+  "카페·디저트": { emoji: "☕", color: "#A0785A" },
+  의료:       { emoji: "💊", color: "#81B29A" },
+  교육:       { emoji: "📚", color: "#F2CC8F" },
+  문화:       { emoji: "🎭", color: "#C77DFF" },
+  쇼핑:       { emoji: "🛍️", color: "#4A6FA5" },
+  여행:       { emoji: "✈️", color: "#4A90D9" },
+  용돈:       { emoji: "💸", color: "#2EC4B6" },
+  주거:       { emoji: "🏠", color: "#3BB273" },
+  기타:       { emoji: "📦", color: "#aaa" },
 };
 const INCOME_CATEGORIES = {
   급여:   { emoji: "💼", color: "#3BB273" },
@@ -253,7 +254,7 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
   const [inputMode, setInputMode] = useState("text"); // "text" | "csv"
   const fileRef = useRef();
 
-  const EXPENSE_CATEGORIES = ["식비","장보기","의료","교육","문화","쇼핑","여행","용돈","주거","기타"];
+  const EXPENSE_CATEGORIES = ["식비","장보기","카페·디저트","의료","교육","문화","쇼핑","여행","용돈","주거","기타"];
 
   const parseWithAI = async (content) => {
     setParsing(true); setParseError("");
@@ -356,6 +357,7 @@ ${content.slice(0, 8000)}`}]
       const category = (() => {
         const n = memo;
         if (/스타벅스|커피|베이커리|맥도날드|버거킹|롯데리아|피자|치킨|식당|음식|한식|중식|일식|분식|김밥|도시락/.test(n)) return "식비";
+        if (/카페|디저트|케이크|마카롱|빵|파리바게|뚜레쥬르|이디야|투썸|할리스|폴바셋/.test(n)) return "카페·디저트";
         if (/마트|이마트|홈플러스|롯데마트|코스트코|GS25|CU|세븐|편의점|농협|하나로/.test(n)) return "장보기";
         if (/병원|의원|약국|클리닉|치과|한의원|건강/.test(n)) return "의료";
         if (/학원|교육|문구|학습|어린이|유치원|학교/.test(n)) return "교육";
@@ -888,7 +890,8 @@ export default function App() {
             <button className="btn-g" style={{padding:"8px 13px",fontSize:13}} onClick={()=>setShowTransferModal(true)}>🔄 이체</button>
             {cards.length>0 && <button className="btn-g" style={{padding:"8px 13px",fontSize:13}} onClick={()=>setShowBulkCardModal(true)}>💳 일괄</button>}
             <button className="btn-b" style={{padding:"8px 15px"}} onClick={()=>{
-              setTxForm(f=>({...f, member:lastMember, date:now.toISOString().slice(0,10)}));
+              setEditTxId(null);
+              setTxForm({date:now.toISOString().slice(0,10),type:"expense",amount:"",category:"식비",memo:"",member:lastMember,accountId:"",cardId:""});
               setShowTxModal(true);
             }}>+ 추가</button>
           </div>
