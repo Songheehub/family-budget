@@ -1422,7 +1422,7 @@ export default function App() {
 
       {/* ── 거래 추가 모달 ── */}
       {showTxModal && (
-        <div className="overlay" onClick={()=>{setShowTxModal(false);setEditTxId(null);}}>
+        <div className="overlay" onClick={()=>{}}>
           <div className="sheet" onClick={e=>e.stopPropagation()}>
             <div style={{width:36,height:4,background:"#E5E0D5",borderRadius:4,margin:"0 auto 20px"}}/>
             <div style={{fontSize:17,fontWeight:700,marginBottom:16}}>{editTxId?"내역 수정":"내역 추가"}</div>
