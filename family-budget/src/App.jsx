@@ -549,7 +549,8 @@ export default function App() {
   const [txForm, setTxForm] = useState({date:now.toISOString().slice(0,10),type:"expense",amount:"",category:"식비",memo:"",member:"",accountId:"",cardId:""});
   const [editTxId, setEditTxId] = useState(null);
   const [lastMember, setLastMember] = useState("");
-  const [dashMember, setDashMember] = useState(null); // 대시보드 멤버 필터
+  const [dashMember, setDashMember] = useState(null);
+  const [dashMonthOffset, setDashMonthOffset] = useState(0); // 0=이번달, -1=지난달, ...
   const [lastCardId, setLastCardId] = useState("");
   const [lastCardMemberId, setLastCardMemberId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -942,8 +943,15 @@ export default function App() {
 
         {/* ── 대시보드 ── */}
         {tab==="dashboard" && (()=>{
+          // 선택된 월 계산
+          const selDate = new Date(now.getFullYear(), now.getMonth() + dashMonthOffset, 1);
+          const selMonth = `${selDate.getFullYear()}-${String(selDate.getMonth()+1).padStart(2,"0")}`;
+          const selMonthLabel = `${selDate.getFullYear()}년 ${selDate.getMonth()+1}월`;
+          const isCurrentMonth = dashMonthOffset === 0;
+
           const activeMem = dashMember ? members.find(m=>m.id===dashMember) : null;
-          const dashTx = dashMember ? monthTx.filter(t=>t.member===dashMember) : monthTx;
+          const selMonthTx = transactions.filter(t=>t.date.startsWith(selMonth));
+          const dashTx = dashMember ? selMonthTx.filter(t=>t.member===dashMember) : selMonthTx;
           const dashIncome  = dashTx.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
           const dashExpense = dashTx.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
           const dashBalance = dashIncome - dashExpense;
@@ -956,8 +964,17 @@ export default function App() {
           <div className="up" style={{display:"flex",flexDirection:"column",gap:13}}>
             {/* 이번 달 수지 메인 카드 */}
             <div style={{background:"linear-gradient(135deg,#4A6FA5,#3257A0)",borderRadius:20,padding:"20px 22px",color:"white"}}>
-              <div style={{fontSize:11,opacity:.75,marginBottom:2}}>
-                {thisMonthLabel} {activeMem ? `· ${activeMem.emoji} ${activeMem.name}` : "전체"}
+              {/* 월 네비게이션 */}
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                <button onClick={()=>setDashMonthOffset(o=>o-1)}
+                  style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,padding:"4px 10px",color:"white",fontSize:16,cursor:"pointer",lineHeight:1}}>‹</button>
+                <div style={{fontSize:13,opacity:.9,fontWeight:600}}>
+                  {selMonthLabel} {activeMem ? `· ${activeMem.emoji} ${activeMem.name}` : "전체"}
+                  {isCurrentMonth && <span style={{fontSize:10,opacity:.7,marginLeft:6}}>이번 달</span>}
+                </div>
+                <button onClick={()=>setDashMonthOffset(o=>Math.min(0,o+1))}
+                  style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,padding:"4px 10px",color:isCurrentMonth?"rgba(255,255,255,.3)":"white",fontSize:16,cursor:isCurrentMonth?"default":"pointer",lineHeight:1}}
+                  disabled={isCurrentMonth}>›</button>
               </div>
               <div style={{fontSize:32,fontWeight:700,marginBottom:3}}>{dashBalance>=0?"+":""}{fmtShort(dashBalance)}</div>
               <div style={{fontSize:12,opacity:.7,marginBottom:14}}>
@@ -1031,13 +1048,13 @@ export default function App() {
             {/* 전체 선택 시: 멤버별 수지 비교 */}
             {!dashMember && members.filter(m=>m.id!==9999).length > 0 && (
               <div className="card">
-                <div style={{fontSize:13,fontWeight:700,marginBottom:14}}>👨‍👩‍👧 멤버별 이번 달</div>
+                <div style={{fontSize:13,fontWeight:700,marginBottom:14}}>👨‍👩‍👧 멤버별 {selMonthLabel}</div>
                 {members.filter(m=>m.id!==9999).map((m,i)=>{
-                  const inc = monthTx.filter(t=>t.type==="income"&&t.member===m.id).reduce((s,t)=>s+t.amount,0);
-                  const exp = monthTx.filter(t=>t.type==="expense"&&t.member===m.id).reduce((s,t)=>s+t.amount,0);
+                  const inc = selMonthTx.filter(t=>t.type==="income"&&t.member===m.id).reduce((s,t)=>s+t.amount,0);
+                  const exp = selMonthTx.filter(t=>t.type==="expense"&&t.member===m.id).reduce((s,t)=>s+t.amount,0);
                   const bal = inc - exp;
                   const maxExp = Math.max(...members.filter(x=>x.id!==9999).map(x=>
-                    monthTx.filter(t=>t.type==="expense"&&t.member===x.id).reduce((s,t)=>s+t.amount,0)
+                    selMonthTx.filter(t=>t.type==="expense"&&t.member===x.id).reduce((s,t)=>s+t.amount,0)
                   ),1);
                   return (
                     <div key={m.id} style={{marginBottom:11,cursor:"pointer"}} onClick={()=>setDashMember(m.id)}>
