@@ -538,6 +538,7 @@ export default function App() {
   const [settleAccountId, setSettleAccountId] = useState("");
   const [showBulkCardModal, setShowBulkCardModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState(null);
+  const [txMonthOffset, setTxMonthOffset] = useState(0); // 내역 탭 월 필터
   const [expandedCat, setExpandedCat] = useState({});
   const [chartView, setChartView] = useState("category");
   const [chartPeriod, setChartPeriod] = useState("monthly");
@@ -549,8 +550,8 @@ export default function App() {
   const [txForm, setTxForm] = useState({date:now.toISOString().slice(0,10),type:"expense",amount:"",category:"식비",memo:"",member:"",accountId:"",cardId:""});
   const [editTxId, setEditTxId] = useState(null);
   const [lastMember, setLastMember] = useState("");
-  const [dashMember, setDashMember] = useState(null);
-  const [dashMonthOffset, setDashMonthOffset] = useState(0); // 0=이번달, -1=지난달, ...
+  const [dashMembers, setDashMembers] = useState([]); // 대시보드 멤버 필터 (복수)
+  const [dashMonthOffset, setDashMonthOffset] = useState(0);
   const [lastCardId, setLastCardId] = useState("");
   const [lastCardMemberId, setLastCardMemberId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -762,7 +763,14 @@ export default function App() {
   },[monthTx]);
 
   const memberExpense = useMemo(()=>members.map(m=>({...m,expense:monthTx.filter(t=>t.type==="expense"&&t.member===m.id).reduce((s,t)=>s+t.amount,0)})),[monthTx,members]);
-  const filteredTx    = useMemo(()=>[...transactions].filter(t=>!selectedMember||t.member===selectedMember).sort((a,b)=>b.date.localeCompare(a.date)),[transactions,selectedMember]);
+  const filteredTx = useMemo(()=>{
+    const selDate = new Date(now.getFullYear(), now.getMonth() + txMonthOffset, 1);
+    const selMonth = `${selDate.getFullYear()}-${String(selDate.getMonth()+1).padStart(2,"0")}`;
+    return [...transactions]
+      .filter(t => t.date.startsWith(selMonth))
+      .filter(t => !selectedMember || t.member === selectedMember)
+      .sort((a,b)=>b.date.localeCompare(a.date));
+  }, [transactions, selectedMember, txMonthOffset]);
 
   // 자산 스냅샷 기록 (카테고리별 월간 + 통장별 일간)
   const buildSnapshot = (newCats, prevSetup) => {
@@ -943,15 +951,15 @@ export default function App() {
 
         {/* ── 대시보드 ── */}
         {tab==="dashboard" && (()=>{
-          // 선택된 월 계산
           const selDate = new Date(now.getFullYear(), now.getMonth() + dashMonthOffset, 1);
           const selMonth = `${selDate.getFullYear()}-${String(selDate.getMonth()+1).padStart(2,"0")}`;
           const selMonthLabel = `${selDate.getFullYear()}년 ${selDate.getMonth()+1}월`;
           const isCurrentMonth = dashMonthOffset === 0;
 
-          const activeMem = dashMember ? members.find(m=>m.id===dashMember) : null;
+          // 멀티 멤버: dashMembers가 비어있으면 전체
+          const hasFilter = dashMembers.length > 0;
           const selMonthTx = transactions.filter(t=>t.date.startsWith(selMonth));
-          const dashTx = dashMember ? selMonthTx.filter(t=>t.member===dashMember) : selMonthTx;
+          const dashTx = hasFilter ? selMonthTx.filter(t=>dashMembers.includes(t.member)) : selMonthTx;
           const dashIncome  = dashTx.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
           const dashExpense = dashTx.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
           const dashBalance = dashIncome - dashExpense;
@@ -960,6 +968,15 @@ export default function App() {
             dashTx.filter(t=>t.type==="expense").forEach(t=>{ map[t.category]=(map[t.category]||0)+t.amount; });
             return Object.entries(map).map(([name,value])=>({name,value,...(EXPENSE_CATEGORIES[name]||{})})).sort((a,b)=>b.value-a.value);
           })();
+
+          const toggleMember = (id) => setDashMembers(prev =>
+            prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]
+          );
+
+          const memberLabel = hasFilter
+            ? members.filter(m=>dashMembers.includes(m.id)).map(m=>`${m.emoji}${m.name}`).join("+")
+            : "전체";
+
           return (
           <div className="up" style={{display:"flex",flexDirection:"column",gap:13}}>
             {/* 이번 달 수지 메인 카드 */}
@@ -969,7 +986,7 @@ export default function App() {
                 <button onClick={()=>setDashMonthOffset(o=>o-1)}
                   style={{background:"rgba(255,255,255,.2)",border:"none",borderRadius:8,padding:"4px 10px",color:"white",fontSize:16,cursor:"pointer",lineHeight:1}}>‹</button>
                 <div style={{fontSize:13,opacity:.9,fontWeight:600}}>
-                  {selMonthLabel} {activeMem ? `· ${activeMem.emoji} ${activeMem.name}` : "전체"}
+                  {selMonthLabel} · {memberLabel}
                   {isCurrentMonth && <span style={{fontSize:10,opacity:.7,marginLeft:6}}>이번 달</span>}
                 </div>
                 <button onClick={()=>setDashMonthOffset(o=>Math.min(0,o+1))}
@@ -992,18 +1009,21 @@ export default function App() {
               </div>
             </div>
 
-            {/* 멤버 필터 칩 */}
+            {/* 멤버 필터 칩 (멀티셀렉트) */}
             <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
-              <button onClick={()=>setDashMember(null)} className="chip"
-                style={{border:`1.5px solid ${!dashMember?"#4A6FA5":"#E5E0D5"}`,background:!dashMember?"#EEF2F9":"white",color:!dashMember?"#4A6FA5":"#666"}}>
+              <button onClick={()=>setDashMembers([])} className="chip"
+                style={{border:`1.5px solid ${!hasFilter?"#4A6FA5":"#E5E0D5"}`,background:!hasFilter?"#EEF2F9":"white",color:!hasFilter?"#4A6FA5":"#666"}}>
                 👨‍👩‍👧 전체
               </button>
-              {members.filter(m=>m.id!==9999).map((m,i)=>(
-                <button key={m.id} onClick={()=>setDashMember(dashMember===m.id?null:m.id)} className="chip"
-                  style={{border:`1.5px solid ${dashMember===m.id?MEMBER_COLORS[i%6]:"#E5E0D5"}`,background:dashMember===m.id?MEMBER_COLORS[i%6]+"22":"white",color:dashMember===m.id?MEMBER_COLORS[i%6]:"#666"}}>
-                  {m.emoji} {m.name}
-                </button>
-              ))}
+              {members.filter(m=>m.id!==9999).map((m,i)=>{
+                const active = dashMembers.includes(m.id);
+                return (
+                  <button key={m.id} onClick={()=>toggleMember(m.id)} className="chip"
+                    style={{border:`1.5px solid ${active?MEMBER_COLORS[i%6]:"#E5E0D5"}`,background:active?MEMBER_COLORS[i%6]+"22":"white",color:active?MEMBER_COLORS[i%6]:"#666"}}>
+                    {m.emoji} {m.name}
+                  </button>
+                );
+              })}
             </div>
 
             {/* 도넛차트 + 카테고리 리스트 */}
@@ -1011,7 +1031,7 @@ export default function App() {
               <div className="card">
                 <div style={{fontSize:13,fontWeight:700,marginBottom:4}}>
                   📊 카테고리별 지출
-                  {activeMem && <span style={{fontSize:11,color:"#aaa",fontWeight:400,marginLeft:6}}>{activeMem.emoji} {activeMem.name}</span>}
+                  {hasFilter && <span style={{fontSize:11,color:"#aaa",fontWeight:400,marginLeft:6}}>{memberLabel}</span>}
                 </div>
                 <div style={{display:"flex",alignItems:"center"}}>
                   <div style={{flexShrink:0}}>
@@ -1046,7 +1066,7 @@ export default function App() {
             )}
 
             {/* 전체 선택 시: 멤버별 수지 비교 */}
-            {!dashMember && members.filter(m=>m.id!==9999).length > 0 && (
+            {!hasFilter && members.filter(m=>m.id!==9999).length > 0 && (
               <div className="card">
                 <div style={{fontSize:13,fontWeight:700,marginBottom:14}}>👨‍👩‍👧 멤버별 {selMonthLabel}</div>
                 {members.filter(m=>m.id!==9999).map((m,i)=>{
@@ -1057,7 +1077,7 @@ export default function App() {
                     selMonthTx.filter(t=>t.type==="expense"&&t.member===x.id).reduce((s,t)=>s+t.amount,0)
                   ),1);
                   return (
-                    <div key={m.id} style={{marginBottom:11,cursor:"pointer"}} onClick={()=>setDashMember(m.id)}>
+                    <div key={m.id} style={{marginBottom:11,cursor:"pointer"}} onClick={()=>setDashMembers([m.id])}>
                       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
                         <span style={{fontSize:18,width:26,flexShrink:0}}>{m.emoji}</span>
                         <span style={{fontSize:13,fontWeight:600,flex:1}}>{m.name}</span>
@@ -1314,8 +1334,24 @@ export default function App() {
         )}
 
         {/* ── 내역 탭 ── */}
-        {tab==="transactions" && (
+        {tab==="transactions" && (()=>{
+          const txSelDate = new Date(now.getFullYear(), now.getMonth() + txMonthOffset, 1);
+          const txSelMonthLabel = `${txSelDate.getFullYear()}년 ${txSelDate.getMonth()+1}월`;
+          const isTxCurrentMonth = txMonthOffset === 0;
+          return (
           <div className="up" style={{display:"flex",flexDirection:"column",gap:13}}>
+            {/* 월 네비게이션 */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"white",borderRadius:14,padding:"10px 16px",boxShadow:"0 2px 8px rgba(0,0,0,.05)"}}>
+              <button onClick={()=>setTxMonthOffset(o=>o-1)}
+                style={{background:"#F0EBE0",border:"none",borderRadius:8,padding:"6px 14px",fontSize:16,cursor:"pointer",color:"#555",lineHeight:1}}>‹</button>
+              <span style={{fontSize:15,fontWeight:700,color:"#2A2A2A"}}>
+                {txSelMonthLabel} {isTxCurrentMonth && <span style={{fontSize:11,color:"#4A6FA5",fontWeight:400}}>이번 달</span>}
+              </span>
+              <button onClick={()=>setTxMonthOffset(o=>Math.min(0,o+1))}
+                style={{background:isTxCurrentMonth?"#F5F0E8":"#F0EBE0",border:"none",borderRadius:8,padding:"6px 14px",fontSize:16,cursor:isTxCurrentMonth?"default":"pointer",color:isTxCurrentMonth?"#ccc":"#555",lineHeight:1}}
+                disabled={isTxCurrentMonth}>›</button>
+            </div>
+
             <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
               <button onClick={()=>setSelectedMember(null)} className="chip" style={{border:`1.5px solid ${!selectedMember?"#4A6FA5":"#E5E0D5"}`,background:!selectedMember?"#EEF2F9":"white",color:!selectedMember?"#4A6FA5":"#666"}}>전체</button>
               {members.map((m,i)=>(
@@ -1390,7 +1426,8 @@ export default function App() {
               })}
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {/* ── 고정지출 탭 ── */}
         {tab==="recurring" && (
@@ -1544,7 +1581,7 @@ export default function App() {
 
       {/* ── 거래 추가 모달 ── */}
       {showTxModal && (
-        <div className="overlay" onClick={()=>{setShowTxModal(false);setEditTxId(null);}}>
+        <div className="overlay" onClick={e=>e.target===e.currentTarget&&(setShowTxModal(false),setEditTxId(null))}>
           <div className="sheet" onClick={e=>e.stopPropagation()}>
             <div style={{width:36,height:4,background:"#E5E0D5",borderRadius:4,margin:"0 auto 20px"}}/>
             <div style={{fontSize:17,fontWeight:700,marginBottom:16}}>{editTxId?"내역 수정":"내역 추가"}</div>
