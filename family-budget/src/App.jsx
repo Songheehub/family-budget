@@ -695,28 +695,50 @@ export default function App() {
   const cards        = setup?.cards        || [];
   const totalAssetValue = allTotal(assetCats);
 
-  // 카드별 미정산 누적금액
-  const cardBalances = useMemo(() => {
+  // 카드별 월별 미정산 금액 { cardId: { "2026-02": 50000, "2026-03": 120000 } }
+  const cardMonthlyBalances = useMemo(() => {
     const map = {};
-    cards.forEach(c => { map[String(c.id)] = 0; });
+    cards.forEach(c => { map[String(c.id)] = {}; });
+    // 미정산 지출 월별 누적
     transactions.filter(t => t.cardId && !t.isCardSettle).forEach(t => {
       const k = String(t.cardId);
-      if (map[k] !== undefined) map[k] += t.amount;
+      const mon = t.date.slice(0, 7); // "2026-02"
+      if (map[k]) map[k][mon] = (map[k][mon] || 0) + t.amount;
+    });
+    // 정산 내역은 settleMonth 기준으로 차감
+    transactions.filter(t => t.isCardSettle && t.cardId).forEach(t => {
+      const k = String(t.cardId);
+      const mon = t.settleMonth || t.date.slice(0, 7);
+      if (map[k] && map[k][mon] !== undefined) {
+        map[k][mon] = Math.max(0, (map[k][mon] || 0) - t.amount);
+        if (map[k][mon] === 0) delete map[k][mon];
+      }
     });
     return map;
   }, [transactions, cards]);
 
+  // 카드별 전체 미정산 합계 (기존 호환)
+  const cardBalances = useMemo(() => {
+    const map = {};
+    cards.forEach(c => {
+      const monthly = cardMonthlyBalances[String(c.id)] || {};
+      map[String(c.id)] = Object.values(monthly).reduce((s, v) => s + v, 0);
+    });
+    return map;
+  }, [cardMonthlyBalances, cards]);
+
   // 카드 정산
   const settleCard = () => {
-    const card = showSettleModal;
-    if (!card || !settleAccountId) return;
-    const amt = cardBalances[String(card.id)] || 0;
+    const { card, month } = showSettleModal;
+    if (!card || !settleAccountId || !month) return;
+    const amt = (cardMonthlyBalances[String(card.id)] || {})[month] || 0;
     if (!amt) return;
     const settleDate = now.toISOString().slice(0,10);
-    // 정산 내역 (지출로 통장에서 차감)
+    const monthLabel = month.replace("-", "년 ") + "월";
     const settleTx = { id: Date.now(), date: settleDate, type:"expense", amount: amt,
-      category:"기타", memo:`${card.name} 카드 정산`, member: card.memberId||9999,
-      accountId: settleAccountId, isCardSettle: true, cardId: card.id };
+      category:"기타", memo:`${cardLabel(card, members)} ${monthLabel} 정산`,
+      member: card.memberId||9999, accountId: settleAccountId,
+      isCardSettle: true, cardId: card.id, settleMonth: month };
     setTransactions(prev => [...prev, settleTx]);
     setSetup(s => {
       const newCats = adjustAccount(s.assetCats, settleAccountId, -amt);
@@ -1113,23 +1135,41 @@ export default function App() {
                   <div style={{fontSize:14,fontWeight:700}}>💳 카드 미정산 잔액</div>
                 </div>
                 {cards.map(card => {
-                  const bal = cardBalances[String(card.id)] || 0;
-                  const mem = members.find(m=>m.id===card.memberId);
+                  const monthly = cardMonthlyBalances[String(card.id)] || {};
+                  const totalBal = cardBalances[String(card.id)] || 0;
+                  const months = Object.entries(monthly).sort(([a],[b])=>a.localeCompare(b));
                   return (
-                    <div key={card.id} style={{display:"flex",alignItems:"center",gap:12,padding:"13px 18px",borderBottom:"1px solid #F5F0E8"}}>
-                      <div style={{width:38,height:38,borderRadius:11,background:"#FFF0EE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>💳</div>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:14,fontWeight:500}}>{cardLabel(card, members)}</div>
+                    <div key={card.id} style={{borderBottom:"1px solid #F5F0E8"}}>
+                      {/* 카드 헤더 */}
+                      <div style={{display:"flex",alignItems:"center",gap:12,padding:"13px 18px"}}>
+                        <div style={{width:38,height:38,borderRadius:11,background:"#FFF0EE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>💳</div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:14,fontWeight:500}}>{cardLabel(card, members)}</div>
+                          <div style={{fontSize:11,color:"#bbb",marginTop:2}}>{months.length}개월 미정산</div>
+                        </div>
+                        <div style={{fontSize:15,fontWeight:700,color:totalBal>0?"#E07A5F":"#aaa",textAlign:"right"}}>
+                          {fmtShort(totalBal)}
+                        </div>
                       </div>
-                      <div style={{textAlign:"right",marginRight:8}}>
-                        <div style={{fontSize:15,fontWeight:700,color:bal>0?"#E07A5F":"#aaa"}}>{fmtShort(bal)}</div>
-                        <div style={{fontSize:11,color:"#bbb",marginTop:2}}>미정산</div>
-                      </div>
-                      <button onClick={()=>{setShowSettleModal(card);setSettleAccountId("");}}
-                        disabled={bal===0}
-                        style={{background:bal>0?"#E07A5F":"#eee",border:"none",borderRadius:9,padding:"8px 13px",color:bal>0?"white":"#bbb",fontSize:12,fontWeight:600,cursor:bal>0?"pointer":"default",flexShrink:0}}>
-                        정산
-                      </button>
+                      {/* 월별 정산 행 */}
+                      {months.map(([mon, amt]) => {
+                        const [y, m] = mon.split("-");
+                        const label = `${parseInt(y)}년 ${parseInt(m)}월`;
+                        return (
+                          <div key={mon} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 18px 9px 60px",background:"#FAFAF7"}}>
+                            <span style={{fontSize:12,color:"#888",flex:1}}>{label}</span>
+                            <span style={{fontSize:13,fontWeight:600,color:"#E07A5F"}}>{fmt(amt)}</span>
+                            <button
+                              onClick={()=>{setShowSettleModal({card, month:mon});setSettleAccountId("");}}
+                              style={{background:"#E07A5F",border:"none",borderRadius:8,padding:"6px 12px",color:"white",fontSize:12,fontWeight:600,cursor:"pointer",flexShrink:0}}>
+                              정산
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {months.length === 0 && (
+                        <div style={{padding:"8px 18px 12px 60px",fontSize:12,color:"#bbb"}}>미정산 내역 없음</div>
+                      )}
                     </div>
                   );
                 })}
@@ -1571,10 +1611,12 @@ export default function App() {
         <div className="overlay" onClick={()=>setShowSettleModal(null)}>
           <div className="sheet" onClick={e=>e.stopPropagation()}>
             <div style={{width:36,height:4,background:"#E5E0D5",borderRadius:4,margin:"0 auto 20px"}}/>
-            <div style={{fontSize:17,fontWeight:700,marginBottom:6}}>💳 카드 정산</div>
-            <div style={{fontSize:13,color:"#666",marginBottom:18}}>{showSettleModal.name} 미정산 잔액</div>
+            <div style={{fontSize:17,fontWeight:700,marginBottom:4}}>💳 카드 정산</div>
+            <div style={{fontSize:13,color:"#666",marginBottom:18}}>
+              {cardLabel(showSettleModal.card, members)} · {(()=>{const [y,m]=showSettleModal.month.split("-");return `${parseInt(y)}년 ${parseInt(m)}월`;})()}
+            </div>
             <div style={{fontSize:32,fontWeight:700,color:"#E07A5F",textAlign:"center",marginBottom:20}}>
-              {fmt(cardBalances[String(showSettleModal.id)]||0)}
+              {fmt((cardMonthlyBalances[String(showSettleModal.card.id)]||{})[showSettleModal.month]||0)}
             </div>
             <div style={{marginBottom:14}}>
               <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:6}}>출금 통장 선택</label>
