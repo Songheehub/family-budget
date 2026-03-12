@@ -553,6 +553,7 @@ export default function App() {
   const [dashMembers, setDashMembers] = useState([]); // 대시보드 멤버 필터 (복수)
   const [dashMonthOffset, setDashMonthOffset] = useState(0);
   const [selectedDashCat, setSelectedDashCat] = useState(null);
+  const [selectedDashAssets, setSelectedDashAssets] = useState(new Set());
   const [lastCardId, setLastCardId] = useState("");
   const [lastCardMemberId, setLastCardMemberId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -1136,21 +1137,47 @@ export default function App() {
             )}
 
             {/* 자산 요약 */}
-            <div className="card" style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:12,color:"#aaa",marginBottom:3}}>💎 총 가족 자산</div>
-                <div style={{fontSize:22,fontWeight:700}}>{fmtShort(totalAssetValue)}</div>
-                {assetCats.length > 0 && (
-                  <div style={{fontSize:11,color:"#bbb",marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                    {assetCats.map(c=>`${c.emoji} ${c.label} ${fmtShort(catTotal(c))}`).join("  ·  ")}
+            {(()=>{
+              const selCatIds = assetCats.filter(c=>c._dashSelected!==false).map(c=>c.id);
+              // selectedDashAssets: null이면 전체, 아니면 Set of catId
+              const filteredAssetVal = selectedDashAssets.size===0
+                ? totalAssetValue
+                : assetCats.filter(c=>selectedDashAssets.has(c.id)).reduce((s,c)=>s+catTotal(c),0);
+
+              return (
+                <div className="card">
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                    <div>
+                      <div style={{fontSize:12,color:"#aaa",marginBottom:3}}>💎 {selectedDashAssets.size===0?"총 가족 자산":assetCats.filter(c=>selectedDashAssets.has(c.id)).map(c=>`${c.emoji}${c.label}`).join("+")} </div>
+                      <div style={{fontSize:22,fontWeight:700}}>{fmtShort(filteredAssetVal)}</div>
+                    </div>
+                    <button onClick={()=>setShowAssetModal(true)}
+                      style={{background:"#EEF2F9",border:"none",borderRadius:10,padding:"7px 12px",color:"#4A6FA5",fontSize:12,fontWeight:600,cursor:"pointer",flexShrink:0}}>
+                      수정 ✏️
+                    </button>
                   </div>
-                )}
-              </div>
-              <button onClick={()=>setShowAssetModal(true)}
-                style={{background:"#EEF2F9",border:"none",borderRadius:10,padding:"8px 13px",color:"#4A6FA5",fontSize:13,fontWeight:600,cursor:"pointer",flexShrink:0,marginLeft:12}}>
-                수정 ✏️
-              </button>
-            </div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                    {assetCats.map((c,i)=>{
+                      const active = selectedDashAssets.has(c.id);
+                      const total = catTotal(c);
+                      return (
+                        <button key={c.id} onClick={()=>setSelectedDashAssets(prev=>{
+                          const next = new Set(prev);
+                          next.has(c.id)?next.delete(c.id):next.add(c.id);
+                          return next;
+                        })} className="chip"
+                          style={{border:`1.5px solid ${active?c.color||ASSET_COLORS[i%7]:"#E5E0D5"}`,
+                            background:active?(c.color||ASSET_COLORS[i%7])+"18":"white",
+                            color:active?c.color||ASSET_COLORS[i%7]:"#888"}}>
+                          {c.emoji} {c.label}
+                          <span style={{fontSize:11,fontWeight:700,marginLeft:4}}>{fmtShort(total)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
           </div>
           );
