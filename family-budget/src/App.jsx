@@ -1057,7 +1057,7 @@ export default function App() {
               const memberCardRows = memberIds.map(mid => {
                 const mem = members.find(m => m.id === mid);
                 const memberCards = cards.filter(c => (c.memberId || 9999) === mid);
-                // 이 멤버의 카드들의 모든 월별 미정산 행
+                // 미정산 행
                 const rows = [];
                 memberCards.forEach(card => {
                   const monthly = cardMonthlyBalances[String(card.id)] || {};
@@ -1067,7 +1067,19 @@ export default function App() {
                 });
                 rows.sort((a,b) => a.mon.localeCompare(b.mon) || a.card.name.localeCompare(b.card.name));
                 const totalBal = memberCards.reduce((s,c) => s + (cardBalances[String(c.id)] || 0), 0);
-                return { mem, memberCards, rows, totalBal };
+                // 이번 달 정산 완료 금액 (카드별 합산)
+                const settledRows = [];
+                memberCards.forEach(card => {
+                  transactions
+                    .filter(t => t.isCardSettle && String(t.cardId) === String(card.id) && t.date.startsWith(thisMonth))
+                    .forEach(t => {
+                      const mon = t.settleMonth || t.date.slice(0,7);
+                      settledRows.push({ card, mon, amt: t.amount });
+                    });
+                });
+                settledRows.sort((a,b) => a.mon.localeCompare(b.mon));
+                const totalSettled = settledRows.reduce((s,r) => s + r.amt, 0);
+                return { mem, memberCards, rows, totalBal, settledRows, totalSettled };
               });
 
               return (
@@ -1075,7 +1087,7 @@ export default function App() {
                   <div style={{padding:"14px 18px 10px",borderBottom:"1px solid #F5F0E8"}}>
                     <div style={{fontSize:14,fontWeight:700}}>💳 카드 미정산 잔액</div>
                   </div>
-                  {memberCardRows.map(({ mem, rows, totalBal }, i) => (
+                  {memberCardRows.map(({ mem, rows, totalBal, settledRows, totalSettled }, i) => (
                     <div key={mem?.id || i} style={{borderBottom:"1px solid #F5F0E8"}}>
                       {/* 멤버 헤더 */}
                       <div style={{display:"flex",alignItems:"center",gap:12,padding:"13px 18px"}}>
@@ -1084,11 +1096,14 @@ export default function App() {
                         </div>
                         <div style={{flex:1,minWidth:0}}>
                           <div style={{fontSize:14,fontWeight:600}}>{mem?.name || "미지정"}</div>
-                          <div style={{fontSize:11,color:"#bbb",marginTop:2}}>{rows.length}건 미정산</div>
+                          <div style={{fontSize:11,color:"#bbb",marginTop:2}}>{rows.length}건 미정산{totalSettled > 0 && <span style={{color:"#3BB273",marginLeft:6}}>· 이번 달 {fmt(totalSettled)} 정산완료</span>}</div>
                         </div>
-                        <div style={{fontSize:15,fontWeight:700,color:totalBal>0?"#E07A5F":"#aaa",textAlign:"right"}}>{fmtShort(totalBal)}</div>
+                        <div style={{textAlign:"right"}}>
+                          <div style={{fontSize:15,fontWeight:700,color:totalBal>0?"#E07A5F":"#aaa"}}>{fmtShort(totalBal)}</div>
+                          {totalSettled > 0 && <div style={{fontSize:11,color:"#3BB273",marginTop:2}}>✓ {fmtShort(totalSettled)}</div>}
+                        </div>
                       </div>
-                      {/* 카드별 월별 행 */}
+                      {/* 미정산 행 */}
                       {rows.map(({ card, mon, amt }) => {
                         const [y, m] = mon.split("-");
                         const monLabel = `${parseInt(y)}년 ${parseInt(m)}월`;
@@ -1104,7 +1119,21 @@ export default function App() {
                           </div>
                         );
                       })}
-                      {rows.length === 0 && <div style={{padding:"8px 18px 12px 60px",fontSize:12,color:"#bbb"}}>미정산 내역 없음</div>}
+                      {/* 정산 완료 행 */}
+                      {settledRows.map(({ card, mon, amt }, si) => {
+                        const [y, m] = mon.split("-");
+                        const monLabel = `${parseInt(y)}년 ${parseInt(m)}월`;
+                        return (
+                          <div key={`settled-${card.id}-${mon}-${si}`} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 18px 9px 60px",background:"#F6FBF7"}}>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:12,color:"#3BB273",fontWeight:500}}>{card.name}</div>
+                              <div style={{fontSize:11,color:"#bbb"}}>{monLabel} · 정산완료</div>
+                            </div>
+                            <span style={{fontSize:13,fontWeight:600,color:"#3BB273"}}>✓ {fmt(amt)}</span>
+                          </div>
+                        );
+                      })}
+                      {rows.length === 0 && settledRows.length === 0 && <div style={{padding:"8px 18px 12px 60px",fontSize:12,color:"#bbb"}}>미정산 내역 없음</div>}
                     </div>
                   ))}
                 </div>
