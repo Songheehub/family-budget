@@ -824,7 +824,10 @@ export default function App() {
           const isCurrentMonth = dashMonthOffset === 0;
           const hasFilter = dashMembers.length > 0;
           const selMonthTx = transactions.filter(t=>t.date.startsWith(selMonth));
-          const dashTx = hasFilter ? selMonthTx.filter(t=>dashMembers.includes(t.member)) : selMonthTx;
+          // 개별 멤버 선택 시에도 공동(9999) 항상 포함
+          const dashTx = hasFilter
+            ? selMonthTx.filter(t => dashMembers.includes(t.member) || t.member === 9999)
+            : selMonthTx;
           const dashIncome  = dashTx.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
           const dashExpense = dashTx.filter(t=>t.type==="expense"&&!t.isCardSettle).reduce((s,t)=>s+t.amount,0);
           const dashBalance = dashIncome - dashExpense;
@@ -951,9 +954,9 @@ export default function App() {
                 <div style={{fontSize:13,fontWeight:700,marginBottom:14}}>👨‍👩‍👧 멤버별 {selMonthLabel}</div>
                 {members.filter(m=>m.id!==9999).map((m,i)=>{
                   const inc = selMonthTx.filter(t=>t.type==="income"&&t.member===m.id).reduce((s,t)=>s+t.amount,0);
-                  const exp = selMonthTx.filter(t=>t.type==="expense"&&t.member===m.id).reduce((s,t)=>s+t.amount,0);
+                  const exp = selMonthTx.filter(t=>t.type==="expense"&&t.member===m.id&&!t.isCardSettle).reduce((s,t)=>s+t.amount,0);
                   const bal = inc - exp;
-                  const maxExp = Math.max(...members.filter(x=>x.id!==9999).map(x=>selMonthTx.filter(t=>t.type==="expense"&&t.member===x.id).reduce((s,t)=>s+t.amount,0)),1);
+                  const maxExp = Math.max(...members.filter(x=>x.id!==9999).map(x=>selMonthTx.filter(t=>t.type==="expense"&&t.member===x.id&&!t.isCardSettle).reduce((s,t)=>s+t.amount,0)),1);
                   return (
                     <div key={m.id} style={{marginBottom:11,cursor:"pointer"}} onClick={()=>setDashMembers([m.id])}>
                       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
