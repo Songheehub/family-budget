@@ -703,29 +703,44 @@ export default function App() {
   const cards        = setup?.cards        || [];
   const totalAssetValue = allTotal(assetCats);
 
-  // 카드별 월별 미정산 금액 { cardId: { "2026-02": 50000, "2026-03": 120000 } }
-  const cardMonthlyBalances = useMemo(() => {
+  // 정산된 tx ID 집합
+  const settledTxIds = useMemo(() => {
+    const ids = new Set();
+    transactions.filter(t => t.isCardSettle && t.settledTxIds).forEach(t => {
+      t.settledTxIds.forEach(id => ids.add(id));
+    });
+    return ids;
+  }, [transactions]);
+
+  // 카드별 월별 미정산 거래 목록 { cardId: { "2026-02": [tx, ...] } }
+  const cardMonthlyTxMap = useMemo(() => {
     const map = {};
     cards.forEach(c => { map[String(c.id)] = {}; });
-    // 미정산 지출 월별 누적
-    transactions.filter(t => t.cardId && !t.isCardSettle).forEach(t => {
+    transactions.filter(t => t.cardId && !t.isCardSettle && !settledTxIds.has(t.id)).forEach(t => {
       const k = String(t.cardId);
-      const mon = t.date.slice(0, 7); // "2026-02"
-      if (map[k]) map[k][mon] = (map[k][mon] || 0) + t.amount;
-    });
-    // 정산 내역은 settleMonth 기준으로 차감
-    transactions.filter(t => t.isCardSettle && t.cardId).forEach(t => {
-      const k = String(t.cardId);
-      const mon = t.settleMonth || t.date.slice(0, 7);
-      if (map[k] && map[k][mon] !== undefined) {
-        map[k][mon] = Math.max(0, (map[k][mon] || 0) - t.amount);
-        if (map[k][mon] === 0) delete map[k][mon];
+      const mon = t.date.slice(0, 7);
+      if (map[k]) {
+        if (!map[k][mon]) map[k][mon] = [];
+        map[k][mon].push(t);
       }
     });
     return map;
-  }, [transactions, cards]);
+  }, [transactions, cards, settledTxIds]);
 
-  // 카드별 전체 미정산 합계 (기존 호환)
+  // 카드별 월별 미정산 금액 (기존 호환)
+  const cardMonthlyBalances = useMemo(() => {
+    const map = {};
+    cards.forEach(c => {
+      const monthly = cardMonthlyTxMap[String(c.id)] || {};
+      map[String(c.id)] = {};
+      Object.entries(monthly).forEach(([mon, txs]) => {
+        map[String(c.id)][mon] = txs.reduce((s, t) => s + t.amount, 0);
+      });
+    });
+    return map;
+  }, [cardMonthlyTxMap, cards]);
+
+  // 카드별 전체 미정산 합계
   const cardBalances = useMemo(() => {
     const map = {};
     cards.forEach(c => {
@@ -737,16 +752,21 @@ export default function App() {
 
   // 카드 정산
   const settleCard = () => {
-    const { card, month } = showSettleModal;
-    if (!card || !settleAccountId || !month) return;
-    const amt = (cardMonthlyBalances[String(card.id)] || {})[month] || 0;
+    const { card, month, selectedIds } = showSettleModal;
+    if (!card || !settleAccountId || !selectedIds || selectedIds.size === 0) return;
+    const txsToSettle = (cardMonthlyTxMap[String(card.id)]?.[month] || []).filter(t => selectedIds.has(t.id));
+    const amt = txsToSettle.reduce((s, t) => s + t.amount, 0);
     if (!amt) return;
     const settleDate = now.toISOString().slice(0,10);
-    const monthLabel = month.replace("-", "년 ") + "월";
-    const settleTx = { id: Date.now(), date: settleDate, type:"expense", amount: amt,
-      category:"기타", memo:`${cardLabel(card, members)} ${monthLabel} 정산`,
+    const [y, m] = month.split("-");
+    const monthLabel = `${parseInt(y)}년 ${parseInt(m)}월`;
+    const settleTx = {
+      id: Date.now(), date: settleDate, type: "expense", amount: amt,
+      category: "기타", memo: `${cardLabel(card, members)} ${monthLabel} 정산`,
       member: card.memberId||9999, accountId: settleAccountId,
-      isCardSettle: true, cardId: card.id, settleMonth: month };
+      isCardSettle: true, cardId: card.id, settleMonth: month,
+      settledTxIds: Array.from(selectedIds)
+    };
     setTransactions(prev => [...prev, settleTx]);
     setSetup(s => {
       const newCats = adjustAccount(s.assetCats, settleAccountId, -amt);
@@ -1268,7 +1288,11 @@ export default function App() {
                             <span style={{fontSize:12,color:"#888",flex:1}}>{label}</span>
                             <span style={{fontSize:13,fontWeight:600,color:"#E07A5F"}}>{fmt(amt)}</span>
                             <button
-                              onClick={()=>{setShowSettleModal({card, month:mon});setSettleAccountId("");}}
+                              onClick={()=>{
+                                const txs = cardMonthlyTxMap[String(card.id)]?.[mon] || [];
+                                setShowSettleModal({card, month:mon, selectedIds: new Set(txs.map(t=>t.id))});
+                                setSettleAccountId("");
+                              }}
                               style={{background:"#E07A5F",border:"none",borderRadius:8,padding:"6px 12px",color:"white",fontSize:12,fontWeight:600,cursor:"pointer",flexShrink:0}}>
                               정산
                             </button>
@@ -1732,17 +1756,62 @@ export default function App() {
         />}
 
       {/* ── 카드 정산 모달 ── */}
-      {showSettleModal && (
+      {showSettleModal && (()=>{
+        const { card, month, selectedIds } = showSettleModal;
+        const [y, m] = month.split("-");
+        const monthLabel = `${parseInt(y)}년 ${parseInt(m)}월`;
+        const txs = (cardMonthlyTxMap[String(card.id)]?.[month] || []).sort((a,b)=>a.date.localeCompare(b.date));
+        const selectedAmt = txs.filter(t=>selectedIds.has(t.id)).reduce((s,t)=>s+t.amount,0);
+        const toggleTx = (id) => {
+          const next = new Set(selectedIds);
+          next.has(id) ? next.delete(id) : next.add(id);
+          setShowSettleModal(prev=>({...prev, selectedIds: next}));
+        };
+        return (
         <div className="overlay" onClick={()=>setShowSettleModal(null)}>
-          <div className="sheet" onClick={e=>e.stopPropagation()}>
-            <div style={{width:36,height:4,background:"#E5E0D5",borderRadius:4,margin:"0 auto 20px"}}/>
-            <div style={{fontSize:17,fontWeight:700,marginBottom:4}}>💳 카드 정산</div>
-            <div style={{fontSize:13,color:"#666",marginBottom:18}}>
-              {cardLabel(showSettleModal.card, members)} · {(()=>{const [y,m]=showSettleModal.month.split("-");return `${parseInt(y)}년 ${parseInt(m)}월`;})()}
+          <div className="sheet" onClick={e=>e.stopPropagation()} style={{height:"auto",maxHeight:"88vh"}}>
+            <div style={{width:36,height:4,background:"#E5E0D5",borderRadius:4,margin:"0 auto 18px"}}/>
+            <div style={{fontSize:17,fontWeight:700,marginBottom:2}}>💳 카드 정산</div>
+            <div style={{fontSize:13,color:"#888",marginBottom:14}}>{cardLabel(card, members)} · {monthLabel}</div>
+
+            {/* 내역 체크리스트 */}
+            <div style={{maxHeight:320,overflowY:"auto",marginBottom:14,border:"1.5px solid #F0EBE0",borderRadius:12}}>
+              {/* 전체 선택/해제 */}
+              <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderBottom:"1.5px solid #F0EBE0",background:"#FAFAF7",borderRadius:"10px 10px 0 0"}}>
+                <input type="checkbox"
+                  checked={txs.length>0 && txs.every(t=>selectedIds.has(t.id))}
+                  onChange={e=>setShowSettleModal(prev=>({...prev, selectedIds: e.target.checked ? new Set(txs.map(t=>t.id)) : new Set()}))}
+                  style={{width:16,height:16,cursor:"pointer"}}/>
+                <span style={{fontSize:12,fontWeight:600,color:"#666",flex:1}}>전체 선택</span>
+                <span style={{fontSize:12,color:"#aaa"}}>{selectedIds.size}/{txs.length}건</span>
+              </div>
+              {txs.map(t=>{
+                const catInfo = EXPENSE_CATEGORIES[t.category]||{};
+                const mem = members.find(mm=>mm.id===t.member);
+                const checked = selectedIds.has(t.id);
+                return (
+                  <div key={t.id} onClick={()=>toggleTx(t.id)}
+                    style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px",borderBottom:"1px solid #F8F4EF",cursor:"pointer",
+                      background:checked?"#FFF8F6":"white",transition:"background .15s"}}>
+                    <input type="checkbox" checked={checked} onChange={()=>toggleTx(t.id)}
+                      style={{width:16,height:16,cursor:"pointer",flexShrink:0}} onClick={e=>e.stopPropagation()}/>
+                    <span style={{fontSize:16,flexShrink:0}}>{catInfo.emoji||"📦"}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.memo}</div>
+                      <div style={{fontSize:11,color:"#bbb",marginTop:1}}>{t.date} · {mem?.emoji}{mem?.name} · {t.category}</div>
+                    </div>
+                    <span style={{fontSize:13,fontWeight:700,color:checked?"#E07A5F":"#ccc",whiteSpace:"nowrap"}}>-{fmt(t.amount)}</span>
+                  </div>
+                );
+              })}
             </div>
-            <div style={{fontSize:32,fontWeight:700,color:"#E07A5F",textAlign:"center",marginBottom:20}}>
-              {fmt((cardMonthlyBalances[String(showSettleModal.card.id)]||{})[showSettleModal.month]||0)}
+
+            {/* 선택 금액 합계 */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"#FFF3F0",borderRadius:10,marginBottom:14}}>
+              <span style={{fontSize:13,color:"#888"}}>선택한 정산 금액</span>
+              <span style={{fontSize:20,fontWeight:700,color:"#E07A5F"}}>{fmt(selectedAmt)}</span>
             </div>
+
             <div style={{marginBottom:14}}>
               <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:6}}>출금 통장 선택</label>
               <select className="sel" value={settleAccountId} onChange={e=>setSettleAccountId(e.target.value)}>
@@ -1754,11 +1823,15 @@ export default function App() {
             </div>
             <div style={{display:"flex",gap:10}}>
               <button className="btn-g" style={{flex:1}} onClick={()=>setShowSettleModal(null)}>취소</button>
-              <button className="btn-b" style={{flex:2,background:"#E07A5F"}} onClick={settleCard} disabled={!settleAccountId}>정산하기</button>
+              <button className="btn-b" style={{flex:2,background:"#E07A5F"}} onClick={settleCard}
+                disabled={!settleAccountId || selectedIds.size===0}>
+                {selectedIds.size===txs.length ? "전체 정산" : `${selectedIds.size}건 정산`}
+              </button>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ── 고정지출 추가/수정 모달 ── */}
       {showRecurringModal && (()=>{
