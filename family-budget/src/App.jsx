@@ -17,6 +17,7 @@ const EXPENSE_CATEGORIES = {
   여행:       { emoji: "✈️", color: "#4A90D9" },
   용돈:       { emoji: "💸", color: "#2EC4B6" },
   주거:       { emoji: "🏠", color: "#3BB273" },
+  구독료:     { emoji: "📺", color: "#9B59B6" },
   기타:       { emoji: "📦", color: "#aaa" },
 };
 const INCOME_CATEGORIES = {
@@ -301,10 +302,11 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
         if (/SK텔레콤|KT|LG U\+|통신|휴대폰|인터넷|알뜰폰/.test(n)) return "통신";
         if (/전기|가스|수도|관리비|공과금|한국전력|도시가스/.test(n)) return "공과금";
         if (/학원|교육|문구|학습|어린이|유치원|학교/.test(n)) return "교육";
-        if (/영화|CGV|롯데시네마|넷플릭스|유튜브|게임|스포츠|헬스/.test(n)) return "문화";
+        if (/영화|CGV|롯데시네마|게임|스포츠|공연|전시|박물관/.test(n)) return "문화";
         if (/여행|호텔|항공|숙박|에어비앤비|펜션|리조트/.test(n)) return "여행";
         if (/백화점|아울렛|올리브영|다이소|무신사|배민|요기요|쇼핑/.test(n)) return "쇼핑";
         if (/월세|임대|아파트|보험/.test(n)) return "주거";
+        if (/넷플릭스|유튜브프리미엄|애플뮤직|스포티파이|왓챠|웨이브|티빙|시즌|쿠팡플레이|디즈니|구독|멤버십|클라우드|iCloud|ChatGPT|chat\.openai|microsoft 365|어도비|Adobe/.test(n)) return "구독료";
         return "기타";
       })();
       results.push({ date, amount: amt, memo, category, _id: i, enabled: true });
