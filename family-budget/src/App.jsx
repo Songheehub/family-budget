@@ -826,11 +826,11 @@ export default function App() {
           const selMonthTx = transactions.filter(t=>t.date.startsWith(selMonth));
           const dashTx = hasFilter ? selMonthTx.filter(t=>dashMembers.includes(t.member)) : selMonthTx;
           const dashIncome  = dashTx.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
-          const dashExpense = dashTx.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+          const dashExpense = dashTx.filter(t=>t.type==="expense"&&!t.isCardSettle).reduce((s,t)=>s+t.amount,0);
           const dashBalance = dashIncome - dashExpense;
           const donutData = (() => {
             const map={};
-            dashTx.filter(t=>t.type==="expense").forEach(t=>{ map[t.category]=(map[t.category]||0)+t.amount; });
+            dashTx.filter(t=>t.type==="expense"&&!t.isCardSettle).forEach(t=>{ map[t.category]=(map[t.category]||0)+t.amount; });
             return Object.entries(map).map(([name,value])=>({name,value,...(EXPENSE_CATEGORIES[name]||{})})).sort((a,b)=>b.value-a.value);
           })();
           const toggleMember = (id) => setDashMembers(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
@@ -1113,28 +1113,41 @@ export default function App() {
                 entries.forEach(e => { const k = keyFn(e.date||e.month||""); map[k] = e; });
                 return Object.entries(map).sort(([a],[b])=>a.localeCompare(b)).map(([,v])=>v);
               };
-              let chartData = [], lines = [];
+              const tickFmt = v => chartPeriod==="daily"?v.slice(5):chartPeriod==="monthly"?v.slice(2):v;
+              const yFmt = v => v>=100000000?`${(v/100000000).toFixed(0)}억`:v>=10000?`${Math.round(v/10000)}만`:`${v}`;
+
+              // 공통 chartData 계산 (통장별 전체 또는 카테고리별)
+              let baseData = [];
               if (chartView==="category") {
                 const raw = assetHistory.map(h=>({...h, _key: h.month}));
                 if (chartPeriod==="yearly") {
-                  const map={};
-                  raw.forEach(h=>{ const y=(h.month||"").slice(0,4); map[y]=h; });
-                  chartData = Object.entries(map).sort(([a],[b])=>a.localeCompare(b)).map(([,v])=>({...v,_key:v.month?.slice(0,4)||""}));
-                } else { chartData = raw; }
-                lines = assetCats.map(c=>({key:c.label,color:c.color,label:c.label}));
+                  const map={}; raw.forEach(h=>{ const y=(h.month||"").slice(0,4); map[y]=h; });
+                  baseData = Object.entries(map).sort(([a],[b])=>a.localeCompare(b)).map(([,v])=>({...v,_key:v.month?.slice(0,4)||""}));
+                } else { baseData = raw; }
               } else {
-                const focusCat = chartFocusCat ? assetCats.find(c=>c.id===chartFocusCat) : null;
-                const targetAccs = focusCat ? focusCat.accounts : allAccounts;
                 let raw = [...accountHistory].sort((a,b)=>(a.date||"").localeCompare(b.date||""));
-                if (chartPeriod==="monthly") { raw = aggregate(raw, d=>d.slice(0,7)); chartData = raw.map(e=>({...e,_key:e.date?.slice(0,7)||""})); }
-                else if (chartPeriod==="yearly") { raw = aggregate(raw, d=>d.slice(0,4)); chartData = raw.map(e=>({...e,_key:e.date?.slice(0,4)||""})); }
-                else { chartData = raw.map(e=>({...e,_key:e.date||""})); }
-                lines = targetAccs.map((a,i)=>({key:String(a.id),color:focusCat?focusCat.color:ASSET_COLORS[i%7],label:a.name}));
+                if (chartPeriod==="monthly") { raw = aggregate(raw, d=>d.slice(0,7)); baseData = raw.map(e=>({...e,_key:e.date?.slice(0,7)||""})); }
+                else if (chartPeriod==="yearly") { raw = aggregate(raw, d=>d.slice(0,4)); baseData = raw.map(e=>({...e,_key:e.date?.slice(0,4)||""})); }
+                else { baseData = raw.map(e=>({...e,_key:e.date||""})); }
               }
+
+              const focusCat = chartFocusCat ? assetCats.find(c=>c.id===chartFocusCat) : null;
+
+              // 통장별 + 카테고리 선택 → 통장마다 개별 미니 차트
+              const showSplitCharts = chartView==="account" && focusCat;
+              const splitAccounts = focusCat ? focusCat.accounts : [];
+
+              // 통장별 전체(합산) 또는 카테고리별 라인
+              const lines = chartView==="category"
+                ? assetCats.map(c=>({key:c.label,color:c.color,label:c.label}))
+                : focusCat
+                  ? [] // split mode
+                  : allAccounts.map((a,i)=>({key:String(a.id),color:ASSET_COLORS[i%7],label:a.name}));
+
               return (
                 <div className="card">
                   <div style={{fontSize:14,fontWeight:700,marginBottom:12}}>자산 변동 추이</div>
-                  <div style={{display:"flex",gap:7,marginBottom:10}}>
+                  <div style={{display:"flex",gap:7,marginBottom:10,flexWrap:"wrap"}}>
                     <div className="tt" style={{flex:"none",marginBottom:0}}>
                       {[["category","📊 카테고리"],["account","🏦 통장별"]].map(([v,l])=>(
                         <button key={v} className={`tb ${chartView===v?"on":""}`} onClick={()=>setChartView(v)} style={{color:chartView===v?"#4A6FA5":"#999",fontSize:12,padding:"7px 10px",whiteSpace:"nowrap"}}>{l}</button>
@@ -1146,9 +1159,11 @@ export default function App() {
                       ))}
                     </div>
                   </div>
+
+                  {/* 통장별 카테고리 필터 */}
                   {chartView==="account" && (
                     <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
-                      <button onClick={()=>setChartFocusCat(null)} className="chip" style={{border:`1.5px solid ${!chartFocusCat?"#4A6FA5":"#E5E0D5"}`,background:!chartFocusCat?"#EEF2F9":"white",color:!chartFocusCat?"#4A6FA5":"#666"}}>전체</button>
+                      <button onClick={()=>setChartFocusCat(null)} className="chip" style={{border:`1.5px solid ${!chartFocusCat?"#4A6FA5":"#E5E0D5"}`,background:!chartFocusCat?"#EEF2F9":"white",color:!chartFocusCat?"#4A6FA5":"#666"}}>전체 합산</button>
                       {assetCats.map(c=>(
                         <button key={c.id} onClick={()=>setChartFocusCat(chartFocusCat===c.id?null:c.id)} className="chip"
                           style={{border:`1.5px solid ${chartFocusCat===c.id?c.color:"#E5E0D5"}`,background:chartFocusCat===c.id?c.color+"22":"white",color:chartFocusCat===c.id?c.color:"#666"}}>
@@ -1157,20 +1172,63 @@ export default function App() {
                       ))}
                     </div>
                   )}
-                  {chartData.length < 2 ? (
-                    <div style={{textAlign:"center",padding:"24px 0",color:"#aaa",fontSize:13}}>📅 내역이 쌓이면 추이가 표시돼요</div>
+
+                  {/* 통장별 + 카테고리 선택: 개별 미니 차트 */}
+                  {showSplitCharts ? (
+                    baseData.length < 2 ? (
+                      <div style={{textAlign:"center",padding:"24px 0",color:"#aaa",fontSize:13}}>📅 내역이 쌓이면 추이가 표시돼요</div>
+                    ) : (
+                      <div style={{display:"flex",flexDirection:"column",gap:16}}>
+                        {splitAccounts.map((acc, i) => {
+                          const accKey = String(acc.id);
+                          const color = focusCat.color;
+                          // 해당 통장 데이터가 있는지 확인
+                          const hasData = baseData.some(d => d[accKey] !== undefined && d[accKey] > 0);
+                          if (!hasData) return null;
+                          return (
+                            <div key={acc.id}>
+                              <div style={{fontSize:12,fontWeight:600,color:"#555",marginBottom:6,display:"flex",alignItems:"center",gap:6}}>
+                                <div style={{width:8,height:8,borderRadius:2,background:color,flexShrink:0}}/>
+                                {acc.name}
+                                <span style={{fontSize:11,color:"#bbb",fontWeight:400,marginLeft:"auto"}}>{fmtShort(acc.amount)}</span>
+                              </div>
+                              <ResponsiveContainer width="100%" height={120}>
+                                <AreaChart data={baseData} margin={{top:4,right:4,left:0,bottom:0}}>
+                                  <defs>
+                                    <linearGradient id={`gh_split_${accKey}`} x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="5%" stopColor={color} stopOpacity={0.3}/>
+                                      <stop offset="95%" stopColor={color} stopOpacity={0}/>
+                                    </linearGradient>
+                                  </defs>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE0"/>
+                                  <XAxis dataKey="_key" tick={{fontSize:9,fill:"#aaa"}} axisLine={false} tickLine={false} tickFormatter={tickFmt}/>
+                                  <YAxis tick={{fontSize:9,fill:"#aaa"}} tickFormatter={yFmt} axisLine={false} tickLine={false} width={36}/>
+                                  <Tooltip formatter={v=>[fmt(v), acc.name]} contentStyle={{borderRadius:10,border:"none",fontFamily:"inherit",fontSize:11}}/>
+                                  <Area type="monotone" dataKey={accKey} stroke={color} fill={`url(#gh_split_${accKey})`} strokeWidth={2}/>
+                                </AreaChart>
+                              </ResponsiveContainer>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )
                   ) : (
-                    <ResponsiveContainer width="100%" height={220}>
-                      <AreaChart data={chartData}>
-                        <defs>{lines.map(l=>(<linearGradient key={l.key} id={`gh_${l.key}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={l.color} stopOpacity={0.3}/><stop offset="95%" stopColor={l.color} stopOpacity={0}/></linearGradient>))}</defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE0"/>
-                        <XAxis dataKey="_key" tick={{fontSize:10,fill:"#aaa"}} axisLine={false} tickLine={false} tickFormatter={v=>chartPeriod==="daily"?v.slice(5):chartPeriod==="monthly"?v.slice(2):v}/>
-                        <YAxis tick={{fontSize:10,fill:"#aaa"}} tickFormatter={v=>v>=100000000?`${(v/100000000).toFixed(0)}억`:v>=10000?`${Math.round(v/10000)}만`:`${v}`} axisLine={false} tickLine={false}/>
-                        <Tooltip formatter={(v,name)=>[fmt(v), lines.find(l=>l.key===name)?.label||name]} contentStyle={{borderRadius:12,border:"none",fontFamily:"inherit",fontSize:12}}/>
-                        <Legend formatter={name=>lines.find(l=>l.key===name)?.label||name}/>
-                        {lines.map(l=>(<Area key={l.key} type="monotone" dataKey={l.key} stackId={chartView==="category"?"1":undefined} stroke={l.color} fill={`url(#gh_${l.key})`} strokeWidth={2} name={l.key}/>))}
-                      </AreaChart>
-                    </ResponsiveContainer>
+                    // 기존: 카테고리별 또는 통장별 전체 합산 차트
+                    baseData.length < 2 ? (
+                      <div style={{textAlign:"center",padding:"24px 0",color:"#aaa",fontSize:13}}>📅 내역이 쌓이면 추이가 표시돼요</div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height={220}>
+                        <AreaChart data={baseData}>
+                          <defs>{lines.map(l=>(<linearGradient key={l.key} id={`gh_${l.key}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={l.color} stopOpacity={0.3}/><stop offset="95%" stopColor={l.color} stopOpacity={0}/></linearGradient>))}</defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE0"/>
+                          <XAxis dataKey="_key" tick={{fontSize:10,fill:"#aaa"}} axisLine={false} tickLine={false} tickFormatter={tickFmt}/>
+                          <YAxis tick={{fontSize:10,fill:"#aaa"}} tickFormatter={yFmt} axisLine={false} tickLine={false}/>
+                          <Tooltip formatter={(v,name)=>[fmt(v), lines.find(l=>l.key===name)?.label||name]} contentStyle={{borderRadius:12,border:"none",fontFamily:"inherit",fontSize:12}}/>
+                          <Legend formatter={name=>lines.find(l=>l.key===name)?.label||name}/>
+                          {lines.map(l=>(<Area key={l.key} type="monotone" dataKey={l.key} stackId={chartView==="category"?"1":undefined} stroke={l.color} fill={`url(#gh_${l.key})`} strokeWidth={2} name={l.key}/>))}
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    )
                   )}
                 </div>
               );
