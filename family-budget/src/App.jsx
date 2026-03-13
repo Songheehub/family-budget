@@ -638,16 +638,16 @@ export default function App() {
 
   const monthTx      = useMemo(()=>transactions.filter(t=>t.date.startsWith(thisMonth)),[transactions]);
   const totalIncome  = useMemo(()=>monthTx.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0),[monthTx]);
-  const totalExpense = useMemo(()=>monthTx.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0),[monthTx]);
+  const totalExpense = useMemo(()=>monthTx.filter(t=>t.type==="expense"&&!t.isCardSettle).reduce((s,t)=>s+t.amount,0),[monthTx]);
   const balance      = totalIncome - totalExpense;
 
   const categoryData = useMemo(()=>{
     const map={};
-    monthTx.filter(t=>t.type==="expense").forEach(t=>{map[t.category]=(map[t.category]||0)+t.amount;});
+    monthTx.filter(t=>t.type==="expense"&&!t.isCardSettle).forEach(t=>{map[t.category]=(map[t.category]||0)+t.amount;});
     return Object.entries(map).map(([name,value])=>({name,value,...CATEGORIES[name]})).sort((a,b)=>b.value-a.value);
   },[monthTx]);
 
-  const memberExpense = useMemo(()=>members.map(m=>({...m,expense:monthTx.filter(t=>t.type==="expense"&&t.member===m.id).reduce((s,t)=>s+t.amount,0)})),[monthTx,members]);
+  const memberExpense = useMemo(()=>members.map(m=>({...m,expense:monthTx.filter(t=>t.type==="expense"&&!t.isCardSettle&&t.member===m.id).reduce((s,t)=>s+t.amount,0)})),[monthTx,members]);
 
   const filteredTx = useMemo(()=>{
     const selDate = new Date(now.getFullYear(), now.getMonth() + txMonthOffset, 1);
