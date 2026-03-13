@@ -820,7 +820,7 @@ export default function App() {
         <div style={{maxWidth:600,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div>
             <div style={{fontSize:10,color:"#bbb",letterSpacing:"0.1em"}}>FAMILY BUDGET</div>
-            <div style={{fontSize:18,fontWeight:700}}>우리 가족 가계부 🏡</div>
+            <div style={{fontSize:18,fontWeight:700}}>🏡 쏭미노 가계부 </div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
             {saving ? <span style={{fontSize:11,color:"#aaa"}}>저장 중…</span> : lastSaved && <span style={{fontSize:11,color:"#bbb"}}>✓ 저장됨</span>}
