@@ -176,6 +176,24 @@ function AssetEditModal({ assetCats: initCats, onSave, onClose }) {
   };
   const updCat = (cid,k,v) => setCats(cats.map(c=>c.id===cid?{...c,[k]:v}:c));
   const delCat = (cid) => setCats(cats.filter(c=>c.id!==cid));
+  const moveCat = (idx, dir) => setCats(prev => {
+    const a = [...prev]; const to = idx+dir;
+    if (to<0||to>=a.length) return prev;
+    [a[idx],a[to]]=[a[to],a[idx]]; return a;
+  });
+  const moveAcc = (cid, idx, dir) => setCats(cats.map(c => {
+    if (c.id!==cid) return c;
+    const a=[...c.accounts]; const to=idx+dir;
+    if (to<0||to>=a.length) return c;
+    [a[idx],a[to]]=[a[to],a[idx]]; return {...c,accounts:a};
+  }));
+
+  const OB = ({up,down,du,dd}) => (
+    <div style={{display:"flex",flexDirection:"column",gap:1,flexShrink:0}}>
+      <button onClick={up} disabled={du} style={{background:"none",border:"none",color:du?"#e0e0e0":"#bbb",fontSize:11,cursor:du?"default":"pointer",padding:"1px 4px",lineHeight:1}}>▲</button>
+      <button onClick={down} disabled={dd} style={{background:"none",border:"none",color:dd?"#e0e0e0":"#bbb",fontSize:11,cursor:dd?"default":"pointer",padding:"1px 4px",lineHeight:1}}>▼</button>
+    </div>
+  );
 
   return (
     <div className="overlay" onClick={onClose}>
@@ -183,9 +201,10 @@ function AssetEditModal({ assetCats: initCats, onSave, onClose }) {
         <div style={{width:36,height:4,background:"#E5E0D5",borderRadius:4,margin:"0 auto 18px"}}/>
         <div style={{fontSize:17,fontWeight:700,marginBottom:16}}>자산 수정 ✏️</div>
         <div style={{display:"flex",flexDirection:"column",gap:13,marginBottom:12}}>
-          {cats.map(cat=>(
+          {cats.map((cat,ci)=>(
             <div key={cat.id} style={{border:`1.5px solid ${cat.color}55`,borderRadius:14,overflow:"hidden"}}>
               <div style={{background:cat.color+"18",padding:"10px 13px",display:"flex",alignItems:"center",gap:8}}>
+                <OB up={()=>moveCat(ci,-1)} down={()=>moveCat(ci,1)} du={ci===0} dd={ci===cats.length-1}/>
                 <span style={{fontSize:18}}>{cat.emoji}</span>
                 <input className="inp" placeholder="카테고리명" value={cat.label} onChange={e=>updCat(cat.id,"label",e.target.value)}
                   style={{background:"transparent",border:"none",fontWeight:700,padding:0,fontSize:14,flex:1}}/>
@@ -193,8 +212,9 @@ function AssetEditModal({ assetCats: initCats, onSave, onClose }) {
                 <button onClick={()=>delCat(cat.id)} style={{background:"none",border:"none",color:"#ccc",fontSize:13,cursor:"pointer"}}>✕</button>
               </div>
               <div style={{padding:"10px 13px",display:"flex",flexDirection:"column",gap:7}}>
-                {cat.accounts.map(acc=>(
+                {cat.accounts.map((acc,ai)=>(
                   <div key={acc.id} style={{display:"flex",gap:7,alignItems:"center"}}>
+                    <OB up={()=>moveAcc(cat.id,ai,-1)} down={()=>moveAcc(cat.id,ai,1)} du={ai===0} dd={ai===cat.accounts.length-1}/>
                     <input className="inp" style={{flex:1}} placeholder="통장명" value={acc.name} onChange={e=>updAcc(cat.id,acc.id,"name",e.target.value)}/>
                     <input className="inp" style={{flex:1}} placeholder="잔액" type="number" value={acc.amount||""} onChange={e=>updAcc(cat.id,acc.id,"amount",e.target.value)}/>
                     <button onClick={()=>delAcc(cat.id,acc.id)} style={{background:"none",border:"none",color:"#ccc",fontSize:13,cursor:"pointer",padding:"0 4px"}}>✕</button>
@@ -790,7 +810,7 @@ export default function App() {
         <div style={{maxWidth:600,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div>
             <div style={{fontSize:10,color:"#bbb",letterSpacing:"0.1em"}}>FAMILY BUDGET</div>
-            <div style={{fontSize:18,fontWeight:700}}>🏡 쏭미노 가계부 </div>
+            <div style={{fontSize:18,fontWeight:700}}>우리 가족 가계부 🏡</div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
             {saving ? <span style={{fontSize:11,color:"#aaa"}}>저장 중…</span> : lastSaved && <span style={{fontSize:11,color:"#bbb"}}>✓ 저장됨</span>}
