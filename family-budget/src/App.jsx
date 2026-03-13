@@ -716,7 +716,13 @@ export default function App() {
   const cardMonthlyTxMap = useMemo(() => {
     const map = {};
     cards.forEach(c => { map[String(c.id)] = {}; });
-    transactions.filter(t => t.cardId && !t.isCardSettle && !settledTxIds.has(t.id)).forEach(t => {
+    transactions.filter(t => {
+      if (!t.cardId || t.isCardSettle || settledTxIds.has(t.id)) return false;
+      // 카드의 제외 멤버로 입력된 내역은 미정산에서 제외
+      const card = cards.find(c => String(c.id) === String(t.cardId));
+      if (card?.excludedMemberIds?.includes(t.member)) return false;
+      return true;
+    }).forEach(t => {
       const k = String(t.cardId);
       const mon = t.date.slice(0, 7);
       if (map[k]) {
@@ -2035,15 +2041,36 @@ export default function App() {
             <div style={{marginBottom:20}}>
               <div style={{fontSize:13,fontWeight:600,color:"#555",marginBottom:10}}>💳 카드 관리</div>
               {cards.map((card, idx) => {
-                const mem = members.find(m => m.id === card.memberId);
+                const excludedIds = card.excludedMemberIds || [];
                 return (
-                  <div key={card.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 13px",background:"#FAFAF7",borderRadius:10,marginBottom:7}}>
-                    <span style={{fontSize:18}}>💳</span>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:13,fontWeight:500}}>{cardLabel(card, members)}</div>
+                  <div key={card.id} style={{background:"#FAFAF7",borderRadius:10,marginBottom:10,overflow:"hidden"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 13px"}}>
+                      <span style={{fontSize:18}}>💳</span>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,fontWeight:500}}>{cardLabel(card, members)}</div>
+                      </div>
+                      <button onClick={()=>setSetup(s=>({...s, cards:(s.cards||[]).filter((_,i)=>i!==idx)}))}
+                        style={{background:"#FFF0EE",border:"none",borderRadius:8,padding:"5px 10px",color:"#E07A5F",fontSize:12,cursor:"pointer"}}>삭제</button>
                     </div>
-                    <button onClick={()=>setSetup(s=>({...s, cards:(s.cards||[]).filter((_,i)=>i!==idx)}))}
-                      style={{background:"#FFF0EE",border:"none",borderRadius:8,padding:"5px 10px",color:"#E07A5F",fontSize:12,cursor:"pointer"}}>삭제</button>
+                    <div style={{padding:"0 13px 12px",borderTop:"1px solid #F0EBE0"}}>
+                      <div style={{fontSize:11,color:"#aaa",marginTop:8,marginBottom:6}}>🚫 정산 제외 멤버 <span style={{color:"#bbb"}}>(이 멤버로 입력한 내역은 미정산에 안 잡혀요)</span></div>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                        {members.filter(m=>m.id!==9999).map((m,i)=>{
+                          const active = excludedIds.includes(m.id);
+                          return (
+                            <button key={m.id} onClick={()=>{
+                              const next = active
+                                ? excludedIds.filter(id=>id!==m.id)
+                                : [...excludedIds, m.id];
+                              setSetup(s=>({...s, cards:s.cards.map((c,ci)=>ci===idx?{...c,excludedMemberIds:next}:c)}));
+                            }} className="chip"
+                              style={{border:`1.5px solid ${active?"#E07A5F":"#E5E0D5"}`,background:active?"#FFF0EE":"white",color:active?"#E07A5F":"#999",fontSize:11}}>
+                              {m.emoji} {m.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 );
               })}
