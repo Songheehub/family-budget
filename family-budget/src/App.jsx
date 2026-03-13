@@ -779,6 +779,16 @@ export default function App() {
   const deleteTx = (tx) => {
     if (tx.isTransfer) { deleteTransfer(tx); return; }
     setTransactions(prev => prev.filter(x => x.id !== tx.id));
+    // 카드 정산 삭제 시: 출금됐던 통장 잔액 복원
+    if (tx.isCardSettle && tx.accountId) {
+      setSetup(s => {
+        const newCats = adjustAccount(s.assetCats, tx.accountId, tx.amount); // 복원(+)
+        const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
+        return { ...s, assetCats: newCats, assetHistory, accountHistory };
+      });
+      return;
+    }
+    // 일반 내역 삭제 시: 연결 통장 잔액 복원
     if (tx.accountId && !tx.cardId) {
       const delta = tx.type === "income" ? -tx.amount : tx.amount;
       setSetup(s => {
