@@ -502,6 +502,7 @@ export default function App() {
   const [selectedDashAssets, setSelectedDashAssets] = useState(new Set());
   const [lastCardId, setLastCardId] = useState("");
   const [lastCardMemberId, setLastCardMemberId] = useState("");
+  const [showSettled, setShowSettled] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
@@ -820,7 +821,7 @@ export default function App() {
         <div style={{maxWidth:600,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div>
             <div style={{fontSize:10,color:"#bbb",letterSpacing:"0.1em"}}>FAMILY BUDGET</div>
-            <div style={{fontSize:18,fontWeight:700}}>🏡 쏭미노 가계부 </div>
+            <div style={{fontSize:18,fontWeight:700}}>우리 가족 가계부 🏡</div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
             {saving ? <span style={{fontSize:11,color:"#aaa"}}>저장 중…</span> : lastSaved && <span style={{fontSize:11,color:"#bbb"}}>✓ 저장됨</span>}
@@ -1149,20 +1150,29 @@ export default function App() {
                           </div>
                         );
                       })}
-                      {/* 정산 완료 행 */}
-                      {settledRows.map(({ card, mon, amt }, si) => {
-                        const [y, m] = mon.split("-");
-                        const monLabel = `${parseInt(y)}년 ${parseInt(m)}월`;
-                        return (
-                          <div key={`settled-${card.id}-${mon}-${si}`} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 18px 9px 60px",background:"#F6FBF7"}}>
-                            <div style={{flex:1,minWidth:0}}>
-                              <div style={{fontSize:12,color:"#3BB273",fontWeight:500}}>{card.name}</div>
-                              <div style={{fontSize:11,color:"#bbb"}}>{monLabel} · 정산완료</div>
-                            </div>
-                            <span style={{fontSize:13,fontWeight:600,color:"#3BB273"}}>✓ {fmt(amt)}</span>
-                          </div>
-                        );
-                      })}
+                      {/* 정산 완료 — 접기/펼치기 */}
+                      {settledRows.length > 0 && (
+                        <>
+                          <button onClick={()=>setShowSettled(p=>({...p,[mem?.id||i]:!p[mem?.id||i]}))}
+                            style={{display:"flex",alignItems:"center",gap:6,padding:"8px 18px 8px 60px",background:"none",border:"none",cursor:"pointer",width:"100%",textAlign:"left",fontFamily:"inherit"}}>
+                            <span style={{fontSize:11,color:"#3BB273",fontWeight:600}}>✓ 정산완료 {settledRows.length}건 ({fmt(totalSettled)})</span>
+                            <span style={{fontSize:10,color:"#bbb",marginLeft:"auto"}}>{showSettled[mem?.id||i]?"▲ 접기":"▼ 펼치기"}</span>
+                          </button>
+                          {showSettled[mem?.id||i] && settledRows.map(({ card, mon, amt }, si) => {
+                            const [y, m] = mon.split("-");
+                            const monLabel = `${parseInt(y)}년 ${parseInt(m)}월`;
+                            return (
+                              <div key={`settled-${card.id}-${mon}-${si}`} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 18px 7px 60px",background:"#F6FBF7"}}>
+                                <div style={{flex:1,minWidth:0}}>
+                                  <div style={{fontSize:12,color:"#3BB273",fontWeight:500}}>{card.name}</div>
+                                  <div style={{fontSize:11,color:"#bbb"}}>{monLabel}</div>
+                                </div>
+                                <span style={{fontSize:13,fontWeight:600,color:"#3BB273"}}>✓ {fmt(amt)}</span>
+                              </div>
+                            );
+                          })}
+                        </>
+                      )}
                       {rows.length === 0 && settledRows.length === 0 && <div style={{padding:"8px 18px 12px 60px",fontSize:12,color:"#bbb"}}>미정산 내역 없음</div>}
                     </div>
                   ))}
