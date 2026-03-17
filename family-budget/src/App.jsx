@@ -554,6 +554,15 @@ export default function App() {
             { ...base, id: tid+1, type:"transfer", category:"이체", accountId: r.toAccountId, fromAccountId: r.accountId, isTransfer:true, isTransferIn:true, transferPair: tid },
           ];
         }
+        if (r.type === "cardSettle") {
+          // 카드 자동이체: 해당 카드의 전월 미정산 금액을 정산
+          const prevMonth = (() => { const d = new Date(now.getFullYear(), now.getMonth()-1, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
+          const cardTxs = transactions.filter(t => String(t.cardId)===String(r.cardId) && !t.isCardSettle);
+          const prevMonthAmt = cardTxs.filter(t=>t.date.startsWith(prevMonth)).reduce((s,t)=>s+t.amount,0);
+          if (!prevMonthAmt) return []; // 전월 미정산 없으면 스킵
+          const memo = r.memo || `${cards.find(c=>String(c.id)===String(r.cardId))?.name||"카드"} ${prevMonth.replace("-","년 ")}월 자동정산`;
+          return [{ ...base, id: Date.now()+Math.random(), type:"expense", amount:prevMonthAmt, category:"기타", memo, accountId:r.accountId, isCardSettle:true, cardId:r.cardId, settleMonth:prevMonth }];
+        }
         return [{ ...base, id: Date.now() + Math.random(), type: r.type || "expense", category: r.category, accountId: r.accountId || "" }];
       });
     if (autoTx.length > 0) {
@@ -1419,6 +1428,8 @@ export default function App() {
                 const acc = assetCats.flatMap(c=>c.accounts).find(a=>String(a.id)===String(r.accountId));
                 const toAcc = r.type==="transfer" ? assetCats.flatMap(c=>c.accounts).find(a=>String(a.id)===String(r.toAccountId)) : null;
                 const isTransfer = r.type === "transfer";
+                const isCardSettle = r.type === "cardSettle";
+                const settleCard = isCardSettle ? cards.find(c=>String(c.id)===String(r.cardId)) : null;
                 const moveUp = () => { if(idx===0) return; setRecurringItems(prev=>{const a=[...prev];[a[idx-1],a[idx]]=[a[idx],a[idx-1]];return a;}); };
                 const moveDown = () => { setRecurringItems(prev=>{if(idx>=prev.length-1) return prev;const a=[...prev];[a[idx],a[idx+1]]=[a[idx+1],a[idx]];return a;}); };
                 return (
@@ -1427,21 +1438,27 @@ export default function App() {
                       <button onClick={moveUp} disabled={idx===0} style={{background:"none",border:"none",color:idx===0?"#e0e0e0":"#bbb",fontSize:13,cursor:idx===0?"default":"pointer",padding:"1px 4px",lineHeight:1}}>▲</button>
                       <button onClick={moveDown} disabled={idx===recurringItems.length-1} style={{background:"none",border:"none",color:idx===recurringItems.length-1?"#e0e0e0":"#bbb",fontSize:13,cursor:idx===recurringItems.length-1?"default":"pointer",padding:"1px 4px",lineHeight:1}}>▼</button>
                     </div>
-                    <div style={{width:38,height:38,borderRadius:11,background:isTransfer?"#EEF2F9":cat?.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:19,flexShrink:0}}>{isTransfer?"🔄":cat?.emoji||"📦"}</div>
+                    <div style={{width:38,height:38,borderRadius:11,background:isTransfer?"#EEF2F9":isCardSettle?"#FFF0EE":cat?.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:19,flexShrink:0}}>
+                      {isTransfer?"🔄":isCardSettle?"💳":cat?.emoji||"📦"}
+                    </div>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:14,fontWeight:500}}>{r.memo}</div>
-                      <div style={{fontSize:11,color:"#aaa",marginTop:2}}>매월 {r.day}일 · {isTransfer ? `${acc?.name||"?"} → ${toAcc?.name||"?"}` : `${r.category}${acc?` · 💳${acc.name}`:""}`}</div>
+                      <div style={{fontSize:11,color:"#aaa",marginTop:2}}>
+                        매월 {r.day}일 · {isCardSettle ? `${settleCard?.name||"카드"} 전월분 → ${acc?.name||"?"}` : isTransfer ? `${acc?.name||"?"} → ${toAcc?.name||"?"}` : `${r.category}${acc?` · 💳${acc.name}`:""}`}
+                      </div>
                     </div>
                     <div style={{textAlign:"right",flexShrink:0}}>
-                      <div style={{fontSize:14,fontWeight:700,color:isTransfer?"#4A6FA5":r.type==="income"?"#3BB273":"#E07A5F"}}>{isTransfer?"↔":r.type==="income"?"+":"-"}{fmtShort(r.amount)}</div>
-                      <div style={{fontSize:11,color:"#bbb",marginTop:2}}>매월</div>
+                      <div style={{fontSize:14,fontWeight:700,color:isCardSettle?"#E07A5F":isTransfer?"#4A6FA5":r.type==="income"?"#3BB273":"#E07A5F"}}>
+                        {isCardSettle?"전월분":isTransfer?"↔":r.type==="income"?"+":"-"}{isCardSettle?"":fmtShort(r.amount)}
+                      </div>
+                      <div style={{fontSize:11,color:"#bbb",marginTop:2}}>매월 자동</div>
                     </div>
                     <div style={{display:"flex",flexDirection:"column",gap:5,marginLeft:4}}>
                       <button onClick={()=>setRecurringItems(prev=>prev.map(x=>x.id===r.id?{...x,active:x.active===false?true:false}:x))}
                         style={{background:r.active===false?"#F0EBE0":"#E8F5EE",border:"none",borderRadius:7,padding:"4px 8px",fontSize:11,cursor:"pointer",color:r.active===false?"#aaa":"#3BB273",fontWeight:600}}>
                         {r.active===false?"OFF":"ON"}
                       </button>
-                      <button onClick={()=>{setRForm({...r,amount:String(r.amount),toAccountId:r.toAccountId||""});setShowRecurringModal(r);}}
+                      <button onClick={()=>{setRForm({...r,amount:String(r.amount||""),toAccountId:r.toAccountId||"",cardId:r.cardId||""});setShowRecurringModal(r);}}
                         style={{background:"#F5F0E8",border:"none",borderRadius:7,padding:"4px 8px",fontSize:11,cursor:"pointer",color:"#888"}}>수정</button>
                     </div>
                   </div>
@@ -1622,10 +1639,13 @@ export default function App() {
         const isNew = showRecurringModal === "new";
         const editing = isNew ? null : showRecurringModal;
         const isTransfer = rForm.type === "transfer";
+        const isCardSettle = rForm.type === "cardSettle";
         const save = () => {
-          if (!rForm.amount || !rForm.memo) return;
+          if (!rForm.memo) return;
+          if (isCardSettle && (!rForm.cardId || !rForm.accountId)) return;
           if (isTransfer && (!rForm.accountId || !rForm.toAccountId)) return;
-          const item = { ...rForm, id: isNew ? Date.now() : editing.id, amount: parseInt(rForm.amount), active: true };
+          if (!isCardSettle && !isTransfer && !rForm.amount) return;
+          const item = { ...rForm, id: isNew ? Date.now() : editing.id, amount: parseInt(rForm.amount)||0, active: true };
           setRecurringItems(prev => isNew ? [...prev, item] : prev.map(x=>x.id===item.id?item:x));
           setShowRecurringModal(false);
         };
@@ -1641,21 +1661,42 @@ export default function App() {
               <div style={{width:36,height:4,background:"#E5E0D5",borderRadius:4,margin:"0 auto 20px"}}/>
               <div style={{fontSize:17,fontWeight:700,marginBottom:16}}>{isNew?"고정항목 추가":"고정항목 수정"}</div>
               <div className="tt" style={{marginBottom:14}}>
-                <button className={`tb ${rForm.type==="expense"?"on":""}`} onClick={()=>setRForm({...rForm,type:"expense",category:"식비"})} style={{color:rForm.type==="expense"?"#E07A5F":"#999"}}>🔴 지출</button>
-                <button className={`tb ${rForm.type==="income"?"on":""}`} onClick={()=>setRForm({...rForm,type:"income",category:"급여"})} style={{color:rForm.type==="income"?"#3BB273":"#999"}}>💚 수입</button>
-                <button className={`tb ${rForm.type==="transfer"?"on":""}`} onClick={()=>setRForm({...rForm,type:"transfer"})} style={{color:rForm.type==="transfer"?"#4A6FA5":"#999"}}>🔄 이체</button>
+                <button className={`tb ${rForm.type==="expense"?"on":""}`} onClick={()=>setRForm({...rForm,type:"expense",category:"식비"})} style={{color:rForm.type==="expense"?"#E07A5F":"#999",fontSize:12}}>🔴 지출</button>
+                <button className={`tb ${rForm.type==="income"?"on":""}`} onClick={()=>setRForm({...rForm,type:"income",category:"급여"})} style={{color:rForm.type==="income"?"#3BB273":"#999",fontSize:12}}>💚 수입</button>
+                <button className={`tb ${rForm.type==="transfer"?"on":""}`} onClick={()=>setRForm({...rForm,type:"transfer"})} style={{color:rForm.type==="transfer"?"#4A6FA5":"#999",fontSize:12}}>🔄 이체</button>
+                <button className={`tb ${rForm.type==="cardSettle"?"on":""}`} onClick={()=>setRForm({...rForm,type:"cardSettle",amount:""})} style={{color:rForm.type==="cardSettle"?"#E07A5F":"#999",fontSize:12}}>💳 카드</button>
               </div>
               <div style={{marginBottom:11}}><label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>항목명</label>
-                <input className="inp" placeholder={isTransfer?"예: 청약 자동이체":"예: 월세, 보험료"} value={rForm.memo} onChange={e=>setRForm({...rForm,memo:e.target.value})}/></div>
+                <input className="inp" placeholder={isCardSettle?"예: 신한카드 자동이체":isTransfer?"예: 청약 자동이체":"예: 월세, 보험료"} value={rForm.memo} onChange={e=>setRForm({...rForm,memo:e.target.value})}/></div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:11}}>
-                <div><label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>금액 (원)</label>
-                  <input className="inp" type="number" placeholder="0" value={rForm.amount} onChange={e=>setRForm({...rForm,amount:e.target.value})}/></div>
-                <div><label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>매월 몇 일</label>
+                {!isCardSettle && (
+                  <div><label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>금액 (원)</label>
+                    <input className="inp" type="number" placeholder="0" value={rForm.amount} onChange={e=>setRForm({...rForm,amount:e.target.value})}/></div>
+                )}
+                <div style={isCardSettle?{gridColumn:"1/-1"}:{}}><label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>매월 몇 일</label>
                   <select className="sel" value={rForm.day} onChange={e=>setRForm({...rForm,day:parseInt(e.target.value)})}>
                     {Array.from({length:31},(_,i)=>i+1).map(d=><option key={d} value={d}>{d}일</option>)}
                   </select></div>
               </div>
-              {isTransfer ? (<>
+              {isCardSettle ? (<>
+                <div style={{background:"#FFF8F0",borderRadius:10,padding:"10px 13px",marginBottom:12,fontSize:12,color:"#E07A5F"}}>
+                  💡 매월 지정일에 전월 카드 사용액을 자동으로 정산해요
+                </div>
+                <div style={{marginBottom:11}}>
+                  <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>💳 카드 선택</label>
+                  <select className="sel" value={rForm.cardId||""} onChange={e=>setRForm({...rForm,cardId:e.target.value})}>
+                    <option value="">선택</option>
+                    {cards.map(c=><option key={c.id} value={c.id}>{cardLabel(c,members)}</option>)}
+                  </select>
+                </div>
+                <div style={{marginBottom:22}}>
+                  <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>💸 출금 통장</label>
+                  <select className="sel" value={rForm.accountId} onChange={e=>setRForm({...rForm,accountId:e.target.value})}>
+                    <option value="">선택</option>
+                    {assetCats.map(cat=>cat.accounts.map(acc=>(<option key={acc.id} value={acc.id}>{cat.emoji} {cat.label} › {acc.name}</option>)))}
+                  </select>
+                </div>
+              </>) : isTransfer ? (<>
                 <div style={{marginBottom:11}}>
                   <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>💸 출금 통장</label>
                   <select className="sel" value={rForm.accountId} onChange={e=>setRForm({...rForm,accountId:e.target.value})}>
