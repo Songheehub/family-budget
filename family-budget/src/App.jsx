@@ -503,6 +503,7 @@ export default function App() {
   const [lastCardId, setLastCardId] = useState("");
   const [lastCardMemberId, setLastCardMemberId] = useState("");
   const [showSettled, setShowSettled] = useState({});
+  const [showUnsettled, setShowUnsettled] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
@@ -1127,10 +1128,14 @@ export default function App() {
                   <div style={{padding:"14px 18px 10px",borderBottom:"1px solid #F5F0E8"}}>
                     <div style={{fontSize:14,fontWeight:700}}>💳 카드 미정산 잔액</div>
                   </div>
-                  {memberCardRows.map(({ mem, rows, totalBal, settledRows, totalSettled }, i) => (
-                    <div key={mem?.id || i} style={{borderBottom:"1px solid #F5F0E8"}}>
-                      {/* 멤버 헤더 */}
-                      <div style={{display:"flex",alignItems:"center",gap:12,padding:"13px 18px"}}>
+                  {memberCardRows.map(({ mem, rows, totalBal, settledRows, totalSettled }, i) => {
+                    const uid = mem?.id || i;
+                    const expanded = showUnsettled[uid] !== false; // 기본 펼침
+                    return (
+                    <div key={uid} style={{borderBottom:"1px solid #F5F0E8"}}>
+                      {/* 멤버 헤더 — 클릭으로 미정산 접기/펼치기 */}
+                      <div onClick={()=>setShowUnsettled(p=>({...p,[uid]:!expanded}))}
+                        style={{display:"flex",alignItems:"center",gap:12,padding:"13px 18px",cursor:"pointer"}}>
                         <div style={{width:38,height:38,borderRadius:11,background:"#FFF0EE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>
                           {mem?.emoji || "👤"}
                         </div>
@@ -1142,9 +1147,10 @@ export default function App() {
                           <div style={{fontSize:15,fontWeight:700,color:totalBal>0?"#E07A5F":"#aaa"}}>{fmtShort(totalBal)}</div>
                           {totalSettled > 0 && <div style={{fontSize:11,color:"#3BB273",marginTop:2}}>✓ {fmtShort(totalSettled)}</div>}
                         </div>
+                        <span style={{fontSize:12,color:"#ccc",marginLeft:6}}>{expanded?"▲":"▼"}</span>
                       </div>
                       {/* 미정산 행 */}
-                      {rows.map(({ card, mon, amt }) => {
+                      {expanded && rows.map(({ card, mon, amt }) => {
                         const [y, m] = mon.split("-");
                         const monLabel = `${parseInt(y)}년 ${parseInt(m)}월`;
                         return (
@@ -1154,20 +1160,20 @@ export default function App() {
                               <div style={{fontSize:11,color:"#bbb"}}>{monLabel}</div>
                             </div>
                             <span style={{fontSize:13,fontWeight:600,color:"#E07A5F"}}>{fmt(amt)}</span>
-                            <button onClick={()=>{setShowSettleModal({card, month:mon});setSettleAccountId("");}}
+                            <button onClick={e=>{e.stopPropagation();setShowSettleModal({card, month:mon});setSettleAccountId("");}}
                               style={{background:"#E07A5F",border:"none",borderRadius:8,padding:"6px 12px",color:"white",fontSize:12,fontWeight:600,cursor:"pointer",flexShrink:0}}>정산</button>
                           </div>
                         );
                       })}
                       {/* 정산 완료 — 접기/펼치기 */}
-                      {settledRows.length > 0 && (
+                      {expanded && settledRows.length > 0 && (
                         <>
-                          <button onClick={()=>setShowSettled(p=>({...p,[mem?.id||i]:!p[mem?.id||i]}))}
+                          <button onClick={e=>{e.stopPropagation();setShowSettled(p=>({...p,[uid]:!p[uid]}));}}
                             style={{display:"flex",alignItems:"center",gap:6,padding:"8px 18px 8px 60px",background:"none",border:"none",cursor:"pointer",width:"100%",textAlign:"left",fontFamily:"inherit"}}>
                             <span style={{fontSize:11,color:"#3BB273",fontWeight:600}}>✓ 정산완료 {settledRows.length}건 ({fmt(totalSettled)})</span>
-                            <span style={{fontSize:10,color:"#bbb",marginLeft:"auto"}}>{showSettled[mem?.id||i]?"▲ 접기":"▼ 펼치기"}</span>
+                            <span style={{fontSize:10,color:"#bbb",marginLeft:"auto"}}>{showSettled[uid]?"▲ 접기":"▼ 펼치기"}</span>
                           </button>
-                          {showSettled[mem?.id||i] && settledRows.map(({ card, mon, amt }, si) => {
+                          {showSettled[uid] && settledRows.map(({ card, mon, amt }, si) => {
                             const [y, m] = mon.split("-");
                             const monLabel = `${parseInt(y)}년 ${parseInt(m)}월`;
                             return (
@@ -1182,9 +1188,10 @@ export default function App() {
                           })}
                         </>
                       )}
-                      {rows.length === 0 && settledRows.length === 0 && <div style={{padding:"8px 18px 12px 60px",fontSize:12,color:"#bbb"}}>미정산 내역 없음</div>}
+                      {expanded && rows.length === 0 && settledRows.length === 0 && <div style={{padding:"8px 18px 12px 60px",fontSize:12,color:"#bbb"}}>미정산 내역 없음</div>}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               );
             })()}
