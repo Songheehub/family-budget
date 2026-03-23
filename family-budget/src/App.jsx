@@ -1130,12 +1130,10 @@ export default function App() {
                   </div>
                   {memberCardRows.map(({ mem, rows, totalBal, settledRows, totalSettled }, i) => {
                     const uid = mem?.id || i;
-                    const expanded = showUnsettled[uid] !== false; // 기본 펼침
                     return (
                     <div key={uid} style={{borderBottom:"1px solid #F5F0E8"}}>
-                      {/* 멤버 헤더 — 클릭으로 미정산 접기/펼치기 */}
-                      <div onClick={()=>setShowUnsettled(p=>({...p,[uid]:!expanded}))}
-                        style={{display:"flex",alignItems:"center",gap:12,padding:"13px 18px",cursor:"pointer"}}>
+                      {/* 멤버 헤더 */}
+                      <div style={{display:"flex",alignItems:"center",gap:12,padding:"13px 18px"}}>
                         <div style={{width:38,height:38,borderRadius:11,background:"#FFF0EE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>
                           {mem?.emoji || "👤"}
                         </div>
@@ -1147,28 +1145,58 @@ export default function App() {
                           <div style={{fontSize:15,fontWeight:700,color:totalBal>0?"#E07A5F":"#aaa"}}>{fmtShort(totalBal)}</div>
                           {totalSettled > 0 && <div style={{fontSize:11,color:"#3BB273",marginTop:2}}>✓ {fmtShort(totalSettled)}</div>}
                         </div>
-                        <span style={{fontSize:12,color:"#ccc",marginLeft:6}}>{expanded?"▲":"▼"}</span>
                       </div>
-                      {/* 미정산 행 */}
-                      {expanded && rows.map(({ card, mon, amt }) => {
+                      {/* 미정산 행 — 클릭하면 해당 월 내역 펼침 */}
+                      {rows.map(({ card, mon, amt }) => {
                         const [y, m] = mon.split("-");
                         const monLabel = `${parseInt(y)}년 ${parseInt(m)}월`;
+                        const detailKey = `${card.id}-${mon}`;
+                        const isOpen = showUnsettled[detailKey];
+                        // 해당 카드+월 거래 내역
+                        const detailTxs = transactions.filter(t =>
+                          String(t.cardId) === String(card.id) &&
+                          t.date.startsWith(mon) &&
+                          !t.isCardSettle
+                        ).sort((a,b) => b.date.localeCompare(a.date));
                         return (
-                          <div key={`${card.id}-${mon}`} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 18px 9px 60px",background:"#FAFAF7"}}>
-                            <div style={{flex:1,minWidth:0}}>
-                              <div style={{fontSize:12,color:"#555",fontWeight:500}}>{card.name}</div>
-                              <div style={{fontSize:11,color:"#bbb"}}>{monLabel}</div>
+                          <div key={detailKey}>
+                            <div onClick={()=>setShowUnsettled(p=>({...p,[detailKey]:!isOpen}))}
+                              style={{display:"flex",alignItems:"center",gap:10,padding:"9px 18px 9px 60px",background:"#FAFAF7",cursor:"pointer"}}>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontSize:12,color:"#555",fontWeight:500}}>{card.name}</div>
+                                <div style={{fontSize:11,color:"#bbb"}}>{monLabel} · {detailTxs.length}건 {isOpen?"▲":"▼"}</div>
+                              </div>
+                              <span style={{fontSize:13,fontWeight:600,color:"#E07A5F"}}>{fmt(amt)}</span>
+                              <button onClick={e=>{e.stopPropagation();setShowSettleModal({card, month:mon});setSettleAccountId("");}}
+                                style={{background:"#E07A5F",border:"none",borderRadius:8,padding:"6px 12px",color:"white",fontSize:12,fontWeight:600,cursor:"pointer",flexShrink:0}}>정산</button>
                             </div>
-                            <span style={{fontSize:13,fontWeight:600,color:"#E07A5F"}}>{fmt(amt)}</span>
-                            <button onClick={e=>{e.stopPropagation();setShowSettleModal({card, month:mon});setSettleAccountId("");}}
-                              style={{background:"#E07A5F",border:"none",borderRadius:8,padding:"6px 12px",color:"white",fontSize:12,fontWeight:600,cursor:"pointer",flexShrink:0}}>정산</button>
+                            {/* 내역 목록 */}
+                            {isOpen && (
+                              <div style={{background:"#F8F4EF",borderLeft:"3px solid #E07A5F",marginLeft:60}}>
+                                {detailTxs.length === 0 ? (
+                                  <div style={{padding:"8px 14px",fontSize:11,color:"#bbb"}}>내역 없음</div>
+                                ) : detailTxs.map(t => {
+                                  const mem = members.find(m=>m.id===t.member);
+                                  return (
+                                    <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 14px",borderBottom:"1px solid #F0EBE0"}}>
+                                      <span style={{fontSize:13}}>{CATEGORIES[t.category]?.emoji||"📦"}</span>
+                                      <div style={{flex:1,minWidth:0}}>
+                                        <div style={{fontSize:12,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.memo}</div>
+                                        <div style={{fontSize:10,color:"#bbb"}}>{t.date} · {mem?.emoji}{mem?.name}</div>
+                                      </div>
+                                      <span style={{fontSize:12,fontWeight:600,color:"#E07A5F",whiteSpace:"nowrap"}}>{fmt(t.amount)}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
                       {/* 정산 완료 — 접기/펼치기 */}
-                      {expanded && settledRows.length > 0 && (
+                      {settledRows.length > 0 && (
                         <>
-                          <button onClick={e=>{e.stopPropagation();setShowSettled(p=>({...p,[uid]:!p[uid]}));}}
+                          <button onClick={()=>setShowSettled(p=>({...p,[uid]:!p[uid]}))}
                             style={{display:"flex",alignItems:"center",gap:6,padding:"8px 18px 8px 60px",background:"none",border:"none",cursor:"pointer",width:"100%",textAlign:"left",fontFamily:"inherit"}}>
                             <span style={{fontSize:11,color:"#3BB273",fontWeight:600}}>✓ 정산완료 {settledRows.length}건 ({fmt(totalSettled)})</span>
                             <span style={{fontSize:10,color:"#bbb",marginLeft:"auto"}}>{showSettled[uid]?"▲ 접기":"▼ 펼치기"}</span>
@@ -1188,7 +1216,7 @@ export default function App() {
                           })}
                         </>
                       )}
-                      {expanded && rows.length === 0 && settledRows.length === 0 && <div style={{padding:"8px 18px 12px 60px",fontSize:12,color:"#bbb"}}>미정산 내역 없음</div>}
+                      {rows.length === 0 && settledRows.length === 0 && <div style={{padding:"8px 18px 12px 60px",fontSize:12,color:"#bbb"}}>미정산 내역 없음</div>}
                     </div>
                     );
                   })}
