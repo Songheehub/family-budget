@@ -686,7 +686,7 @@ export default function App() {
     return [...transactions]
       .filter(t => t.date.startsWith(selMonth))
       .filter(t => !selectedMember || t.member === selectedMember)
-      .sort((a,b)=>b.date.localeCompare(a.date));
+      .sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
   }, [transactions, selectedMember, txMonthOffset]);
 
   const buildSnapshot = (newCats, prevSetup) => {
