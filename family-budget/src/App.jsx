@@ -787,6 +787,43 @@ export default function App() {
     setTxForm(f => ({ ...f, amount: "", memo: "", accountId: "", cardId: "" }));
   };
 
+  const applyRecurringItem = (r) => {
+    const date = `${thisMonth}-${String(r.day||1).padStart(2,"0")}`;
+    const base = { date, amount: r.amount, memo: r.memo, member: r.member || 9999, isRecurring: true, recurringId: r.id };
+    let newTxs = [];
+    if (r.type === "transfer") {
+      const tid = Date.now();
+      newTxs = [
+        { ...base, id: tid,   type:"transfer", category:"이체", accountId: r.accountId, toAccountId: r.toAccountId, isTransfer:true, transferPair: tid+1 },
+        { ...base, id: tid+1, type:"transfer", category:"이체", accountId: r.toAccountId, fromAccountId: r.accountId, isTransfer:true, isTransferIn:true, transferPair: tid },
+      ];
+    } else if (r.type === "cardSettle") {
+      const prevMonth = (() => { const d = new Date(now.getFullYear(), now.getMonth()-1, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
+      const amt = transactions.filter(t=>String(t.cardId)===String(r.cardId)&&t.date.startsWith(prevMonth)&&!t.isCardSettle).reduce((s,t)=>s+t.amount,0);
+      if (!amt) { alert("전월 미정산 내역이 없어요"); return; }
+      newTxs = [{ ...base, id: Date.now(), type:"expense", amount:amt, category:"기타", memo: r.memo, accountId:r.accountId, isCardSettle:true, cardId:r.cardId, settleMonth:prevMonth }];
+    } else {
+      newTxs = [{ ...base, id: Date.now(), type: r.type||"expense", category: r.category, accountId: r.accountId||"" }];
+    }
+    setTransactions(prev => [...prev, ...newTxs]);
+    if (setup?.assetCats) {
+      setSetup(s => {
+        let newCats = [...s.assetCats];
+        newTxs.forEach(t => {
+          if (t.isTransfer) {
+            if (!t.isTransferIn && t.accountId) newCats = newCats.map(c=>({...c,accounts:c.accounts.map(a=>String(a.id)===String(t.accountId)?{...a,amount:Math.max(0,(a.amount||0)-t.amount)}:a)}));
+            else if (t.isTransferIn && t.accountId) newCats = newCats.map(c=>({...c,accounts:c.accounts.map(a=>String(a.id)===String(t.accountId)?{...a,amount:(a.amount||0)+t.amount}:a)}));
+          } else if (t.accountId) {
+            const delta = t.type==="income" ? t.amount : -t.amount;
+            newCats = newCats.map(c=>({...c,accounts:c.accounts.map(a=>String(a.id)===String(t.accountId)?{...a,amount:Math.max(0,(a.amount||0)+delta)}:a)}));
+          }
+        });
+        const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
+        return { ...s, assetCats: newCats, assetHistory, accountHistory };
+      });
+    }
+  };
+
   const deleteTx = (tx) => {
     if (tx.isTransfer) { deleteTransfer(tx); return; }
     setTransactions(prev => prev.filter(x => x.id !== tx.id));
@@ -831,7 +868,7 @@ export default function App() {
         <div style={{maxWidth:600,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div>
             <div style={{fontSize:10,color:"#bbb",letterSpacing:"0.1em"}}>FAMILY BUDGET</div>
-            <div style={{fontSize:18,fontWeight:700}}>우리 가족 가계부 🏡</div>
+            <div style={{fontSize:18,fontWeight:700}}>쏭미노 가계부 🏡</div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
             {saving ? <span style={{fontSize:11,color:"#aaa"}}>저장 중…</span> : lastSaved && <span style={{fontSize:11,color:"#bbb"}}>✓ 저장됨</span>}
@@ -1506,14 +1543,22 @@ export default function App() {
                 {recurringItems.filter(r=>r.active!==false).map(r => {
                   const applied = transactions.some(t => t.isRecurring && t.recurringId===r.id && t.date.startsWith(thisMonth));
                   const cat = CATEGORIES[r.category];
+                  const isCardSettle = r.type === "cardSettle";
                   return (
                     <div key={r.id} style={{display:"flex",alignItems:"center",gap:10,marginBottom:9}}>
-                      <span style={{fontSize:16}}>{cat?.emoji||"📦"}</span>
+                      <span style={{fontSize:16}}>{isCardSettle?"💳":cat?.emoji||"📦"}</span>
                       <span style={{fontSize:13,flex:1}}>{r.memo}</span>
-                      <span style={{fontSize:12,fontWeight:600,color:r.type==="income"?"#3BB273":"#E07A5F"}}>{r.type==="income"?"+":"-"}{fmtShort(r.amount)}</span>
-                      <span style={{fontSize:11,background:applied?"#E8F5EE":"#FFF3E0",color:applied?"#3BB273":"#FF9F1C",padding:"3px 8px",borderRadius:20,fontWeight:600,whiteSpace:"nowrap"}}>
-                        {applied?"✓ 적용됨":"⏳ 미적용"}
+                      <span style={{fontSize:12,fontWeight:600,color:r.type==="income"?"#3BB273":"#E07A5F"}}>
+                        {isCardSettle?"전월분":r.type==="income"?`+${fmtShort(r.amount)}`:`-${fmtShort(r.amount)}`}
                       </span>
+                      {applied ? (
+                        <span style={{fontSize:11,background:"#E8F5EE",color:"#3BB273",padding:"3px 8px",borderRadius:20,fontWeight:600,whiteSpace:"nowrap"}}>✓ 적용됨</span>
+                      ) : (
+                        <button onClick={()=>applyRecurringItem(r)}
+                          style={{fontSize:11,background:"#FF9F1C",color:"white",border:"none",padding:"4px 10px",borderRadius:20,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit"}}>
+                          ▶ 적용
+                        </button>
+                      )}
                     </div>
                   );
                 })}
