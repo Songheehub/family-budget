@@ -547,7 +547,7 @@ export default function App() {
     const autoTx = recurringItems
       .filter(r => r.active !== false && (r.day || 1) <= now.getDate())
       .flatMap(r => {
-        const base = { date: `${thisMonth}-${String(r.day||1).padStart(2,"0")}`, amount: r.amount, memo: r.memo, member: r.member || 9999, isRecurring: true, recurringId: r.id };
+        const base = { date: `${thisMonth}-${String(r.day||1).padStart(2,"0")}`, amount: r.amount, memo: r.memo, member: parseInt(r.member)||9999, isRecurring: true, recurringId: r.id };
         if (r.type === "transfer") {
           const tid = Date.now() + Math.random();
           return [
@@ -789,7 +789,7 @@ export default function App() {
 
   const applyRecurringItem = (r) => {
     const date = `${thisMonth}-${String(r.day||1).padStart(2,"0")}`;
-    const base = { date, amount: r.amount, memo: r.memo, member: r.member || 9999, isRecurring: true, recurringId: r.id };
+    const base = { date, amount: r.amount, memo: r.memo, member: parseInt(r.member)||9999, isRecurring: true, recurringId: r.id };
     let newTxs = [];
     if (r.type === "transfer") {
       const tid = Date.now();
@@ -1193,8 +1193,9 @@ export default function App() {
                         const detailTxs = transactions.filter(t =>
                           String(t.cardId) === String(card.id) &&
                           t.date.startsWith(mon) &&
-                          !t.isCardSettle
-                        ).sort((a,b) => b.date.localeCompare(a.date));
+                          !t.isCardSettle &&
+                          !(card.excludedMemberIds?.includes(t.member))
+                        ).sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
                         return (
                           <div key={detailKey}>
                             <div onClick={()=>setShowUnsettled(p=>({...p,[detailKey]:!isOpen}))}
