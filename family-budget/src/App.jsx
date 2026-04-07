@@ -45,7 +45,8 @@ const now = new Date();
 const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
 const thisMonthLabel = `${now.getFullYear()}년 ${now.getMonth()+1}월`;
 const catTotal = (cat) => (cat.accounts||[]).reduce((s,a)=>s+(a.amount||0),0);
-const allTotal = (cats) => (cats||[]).reduce((s,c)=>s+catTotal(c),0);
+const catTotalIncluded = (cat) => (cat.accounts||[]).filter(a=>a.excluded!==true).reduce((s,a)=>s+(a.amount||0),0);
+const allTotal = (cats) => (cats||[]).reduce((s,c)=>s+catTotalIncluded(c),0);
 
 const FAMILY_ID = "shared";
 const fbGet = async (collection) => {
@@ -215,9 +216,14 @@ function AssetEditModal({ assetCats: initCats, onSave, onClose }) {
                 {cat.accounts.map((acc,ai)=>(
                   <div key={acc.id} style={{display:"flex",gap:7,alignItems:"center"}}>
                     <OB up={()=>moveAcc(cat.id,ai,-1)} down={()=>moveAcc(cat.id,ai,1)} du={ai===0} dd={ai===cat.accounts.length-1}/>
-                    <input className="inp" style={{flex:1}} placeholder="통장명" value={acc.name} onChange={e=>updAcc(cat.id,acc.id,"name",e.target.value)}/>
-                    <input className="inp" style={{flex:1}} placeholder="잔액" type="number" value={acc.amount||""} onChange={e=>updAcc(cat.id,acc.id,"amount",e.target.value)}/>
-                    <button onClick={()=>delAcc(cat.id,acc.id)} style={{background:"none",border:"none",color:"#ccc",fontSize:13,cursor:"pointer",padding:"0 4px"}}>✕</button>
+                    <input className="inp" style={{flex:1,opacity:acc.excluded?0.45:1}} placeholder="통장명" value={acc.name} onChange={e=>updAcc(cat.id,acc.id,"name",e.target.value)}/>
+                    <input className="inp" style={{flex:1,opacity:acc.excluded?0.45:1}} placeholder="잔액" type="number" value={acc.amount||""} onChange={e=>updAcc(cat.id,acc.id,"amount",e.target.value)}/>
+                    <button onClick={()=>updAcc(cat.id,acc.id,"excluded",!acc.excluded)}
+                      title={acc.excluded?"자산 합계에서 제외됨":"자산 합계에 포함됨"}
+                      style={{background:acc.excluded?"#F0EBE0":"#E8F5EE",border:"none",borderRadius:7,padding:"5px 7px",fontSize:12,cursor:"pointer",flexShrink:0,color:acc.excluded?"#bbb":"#3BB273"}}>
+                      {acc.excluded?"제외":"포함"}
+                    </button>
+                    <button onClick={()=>delAcc(cat.id,acc.id)} style={{background:"none",border:"none",color:"#ccc",fontSize:13,cursor:"pointer",padding:"0 2px"}}>✕</button>
                   </div>
                 ))}
                 <button onClick={()=>addAcc(cat.id)} style={{background:"none",border:`1.5px dashed ${cat.color}88`,borderRadius:8,padding:"7px",color:cat.color,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>+ 통장 추가</button>
@@ -765,7 +771,7 @@ export default function App() {
   };
 
   const addTx = () => {
-    if (!txForm.amount || !txForm.memo || !txForm.member) return;
+    if (!txForm.amount || !txForm.member) return;
     const amt = parseInt(txForm.amount);
     if (editTxId) {
       setTransactions(prev => prev.map(x => x.id === editTxId ? { ...x, ...txForm, amount: amt, member: parseInt(txForm.member) } : x));
@@ -1114,12 +1120,13 @@ export default function App() {
                   {expanded && (
                     <div style={{padding:"8px 13px 13px",display:"flex",flexDirection:"column",gap:7}}>
                       {cat.accounts.map(acc=>(
-                        <div key={acc.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 13px",background:"#FAFAF7",borderRadius:10}}>
+                        <div key={acc.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 13px",background:acc.excluded?"#F5F5F5":"#FAFAF7",borderRadius:10,opacity:acc.excluded?0.5:1}}>
                           <div style={{display:"flex",alignItems:"center",gap:9}}>
-                            <div style={{width:7,height:7,borderRadius:2,background:cat.color,flexShrink:0}}/>
-                            <span style={{fontSize:13,color:"#444"}}>{acc.name}</span>
+                            <div style={{width:7,height:7,borderRadius:2,background:acc.excluded?"#ccc":cat.color,flexShrink:0}}/>
+                            <span style={{fontSize:13,color:acc.excluded?"#aaa":"#444"}}>{acc.name}</span>
+                            {acc.excluded && <span style={{fontSize:10,color:"#bbb",background:"#EFEFEF",padding:"1px 6px",borderRadius:10}}>합계 제외</span>}
                           </div>
-                          <span style={{fontSize:14,fontWeight:700,color:"#2A2A2A"}}>{fmt(acc.amount)}</span>
+                          <span style={{fontSize:14,fontWeight:700,color:acc.excluded?"#bbb":"#2A2A2A"}}>{fmt(acc.amount)}</span>
                         </div>
                       ))}
                       <button onClick={()=>setShowAssetModal(true)} style={{background:"none",border:`1.5px dashed ${cat.color}88`,borderRadius:9,padding:"7px",color:cat.color,fontSize:12,cursor:"pointer",width:"100%",fontFamily:"inherit",marginTop:2}}>✏️ 수정하기</button>
@@ -1358,7 +1365,8 @@ export default function App() {
                                   </defs>
                                   <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE0"/>
                                   <XAxis dataKey="_key" tick={{fontSize:9,fill:"#aaa"}} axisLine={false} tickLine={false} tickFormatter={tickFmt}/>
-                                  <YAxis tick={{fontSize:9,fill:"#aaa"}} tickFormatter={yFmt} axisLine={false} tickLine={false} width={36}/>
+                                  <YAxis tick={{fontSize:9,fill:"#aaa"}} tickFormatter={yFmt} axisLine={false} tickLine={false} width={36}
+                                    domain={[dataMin => Math.floor(dataMin * 0.995), dataMax => Math.ceil(dataMax * 1.005)]}/>
                                   <Tooltip formatter={v=>[fmt(v), acc.name]} contentStyle={{borderRadius:10,border:"none",fontFamily:"inherit",fontSize:11}}/>
                                   <Area type="monotone" dataKey={accKey} stroke={color} fill={`url(#gh_split_${accKey})`} strokeWidth={2}/>
                                 </AreaChart>
