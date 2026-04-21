@@ -706,14 +706,22 @@ export default function App() {
     const accEntry = { date: todayStr };
     newCats.forEach(c=>c.accounts.forEach(a=>{ accEntry[String(a.id)] = a.amount||0; }));
     const prevAccHistory = prevSetup?.accountHistory || [];
-    // 삭제된 내역의 날짜 스냅샷 제거 (오늘 제외)
-    const filteredAccHistory = removeDateEntry && removeDateEntry !== todayStr
+    // 삭제된 내역 날짜가 오늘이 아니면 해당 날짜 스냅샷 제거
+    const filteredAccHistory = (removeDateEntry && removeDateEntry !== todayStr)
       ? prevAccHistory.filter(h => h.date !== removeDateEntry)
       : prevAccHistory;
     const newAccHistory = filteredAccHistory.some(h=>h.date===todayStr)
       ? filteredAccHistory.map(h=>h.date===todayStr?accEntry:h)
       : [...filteredAccHistory, accEntry];
     return { assetHistory: newHistory, accountHistory: newAccHistory };
+  };
+
+  // 특정 날짜 스냅샷만 제거 (차트 이상 데이터 정리용)
+  const removeAccountHistoryDate = (dateStr) => {
+    setSetup(s => ({
+      ...s,
+      accountHistory: (s.accountHistory||[]).filter(h => h.date !== dateStr)
+    }));
   };
 
   const saveAssets = (newCats) => {
@@ -1401,7 +1409,26 @@ export default function App() {
                 </div>
               );
             })()}
-            <div className="card" style={{textAlign:"center",padding:16,color:"#aaa",fontSize:13}}>💡 내역을 추가하거나 자산 수정 시 자동으로 추이가 기록돼요</div>
+            <div className="card" style={{padding:"12px 16px"}}>
+              <div style={{fontSize:12,color:"#aaa",marginBottom:8}}>💡 내역을 추가하거나 자산 수정 시 자동으로 추이가 기록돼요</div>
+              <details style={{fontSize:12}}>
+                <summary style={{cursor:"pointer",color:"#bbb",userSelect:"none"}}>🗑 차트 스냅샷 정리 ({(accountHistory||[]).length}개)</summary>
+                <div style={{marginTop:8,fontSize:11,color:"#aaa",marginBottom:6}}>
+                  잘못 찍힌 날짜를 삭제하면 차트에서 해당 구간이 제거돼요
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:200,overflowY:"auto"}}>
+                  {(accountHistory||[]).length === 0 ? (
+                    <div style={{color:"#ccc",padding:"4px 8px"}}>스냅샷 없음</div>
+                  ) : [...(accountHistory||[])].sort((a,b)=>a.date.localeCompare(b.date)).map(h=>(
+                    <div key={h.date} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"5px 8px",background:"#FAFAF7",borderRadius:7}}>
+                      <span style={{color:"#555"}}>{h.date}</span>
+                      <button onClick={()=>removeAccountHistoryDate(h.date)}
+                        style={{background:"none",border:"none",color:"#E07A5F",fontSize:12,cursor:"pointer",padding:"2px 8px"}}>✕ 삭제</button>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            </div>
           </div>
         )}
 
