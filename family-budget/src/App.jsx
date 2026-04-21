@@ -695,7 +695,7 @@ export default function App() {
       .sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
   }, [transactions, selectedMember, txMonthOffset]);
 
-  const buildSnapshot = (newCats, prevSetup) => {
+  const buildSnapshot = (newCats, prevSetup, removeDateEntry = null) => {
     const todayStr = now.toISOString().slice(0,10);
     const entry = { month: thisMonthLabel };
     newCats.forEach(c=>{ entry[c.label]=catTotal(c); });
@@ -706,9 +706,13 @@ export default function App() {
     const accEntry = { date: todayStr };
     newCats.forEach(c=>c.accounts.forEach(a=>{ accEntry[String(a.id)] = a.amount||0; }));
     const prevAccHistory = prevSetup?.accountHistory || [];
-    const newAccHistory = prevAccHistory.some(h=>h.date===todayStr)
-      ? prevAccHistory.map(h=>h.date===todayStr?accEntry:h)
-      : [...prevAccHistory, accEntry];
+    // 삭제된 내역의 날짜 스냅샷 제거 (오늘 제외)
+    const filteredAccHistory = removeDateEntry && removeDateEntry !== todayStr
+      ? prevAccHistory.filter(h => h.date !== removeDateEntry)
+      : prevAccHistory;
+    const newAccHistory = filteredAccHistory.some(h=>h.date===todayStr)
+      ? filteredAccHistory.map(h=>h.date===todayStr?accEntry:h)
+      : [...filteredAccHistory, accEntry];
     return { assetHistory: newHistory, accountHistory: newAccHistory };
   };
 
@@ -836,8 +840,8 @@ export default function App() {
     // 카드 정산 삭제 시: 출금됐던 통장 잔액 복원
     if (tx.isCardSettle && tx.accountId) {
       setSetup(s => {
-        const newCats = adjustAccount(s.assetCats, tx.accountId, tx.amount); // 복원(+)
-        const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
+        const newCats = adjustAccount(s.assetCats, tx.accountId, tx.amount);
+        const { assetHistory, accountHistory } = buildSnapshot(newCats, s, tx.date);
         return { ...s, assetCats: newCats, assetHistory, accountHistory };
       });
       return;
@@ -847,7 +851,7 @@ export default function App() {
       const delta = tx.type === "income" ? -tx.amount : tx.amount;
       setSetup(s => {
         const newCats = adjustAccount(s.assetCats, tx.accountId, delta);
-        const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
+        const { assetHistory, accountHistory } = buildSnapshot(newCats, s, tx.date);
         return { ...s, assetCats: newCats, assetHistory, accountHistory };
       });
     }
@@ -1296,16 +1300,41 @@ export default function App() {
 
               const focusCat = chartFocusCat ? assetCats.find(c=>c.id===chartFocusCat) : null;
 
-              // 통장별 + 카테고리 선택 → 통장마다 개별 미니 차트
+              // 항상 개별 미니 차트: 카테고리별 or 통장별(카테고리 선택 시)
               const showSplitCharts = chartView==="account" && focusCat;
               const splitAccounts = focusCat ? focusCat.accounts : [];
+              const splitCats = chartView==="category" ? assetCats : [];
 
-              // 통장별 전체(합산) 또는 카테고리별 라인
-              const lines = chartView==="category"
-                ? assetCats.map(c=>({key:c.label,color:c.color,label:c.label}))
-                : focusCat
-                  ? [] // split mode
-                  : allAccounts.map((a,i)=>({key:String(a.id),color:ASSET_COLORS[i%7],label:a.name}));
+              // 통장별 전체 합산 라인 (카테고리 미선택 시)
+              const lines = chartView==="account" && !focusCat
+                ? allAccounts.map((a,i)=>({key:String(a.id),color:ASSET_COLORS[i%7],label:a.name}))
+                : [];
+
+              const MiniChart = ({dataKey, color, label, currentVal}) => (
+                <div>
+                  <div style={{fontSize:12,fontWeight:600,color:"#555",marginBottom:6,display:"flex",alignItems:"center",gap:6}}>
+                    <div style={{width:8,height:8,borderRadius:2,background:color,flexShrink:0}}/>
+                    {label}
+                    {currentVal!=null && <span style={{fontSize:11,color:"#bbb",fontWeight:400,marginLeft:"auto"}}>{fmtShort(currentVal)}</span>}
+                  </div>
+                  <ResponsiveContainer width="100%" height={100}>
+                    <AreaChart data={baseData} margin={{top:4,right:4,left:0,bottom:0}}>
+                      <defs>
+                        <linearGradient id={`gh_mini_${dataKey}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={color} stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor={color} stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE0"/>
+                      <XAxis dataKey="_key" tick={{fontSize:9,fill:"#aaa"}} axisLine={false} tickLine={false} tickFormatter={tickFmt}/>
+                      <YAxis tick={{fontSize:9,fill:"#aaa"}} tickFormatter={yFmt} axisLine={false} tickLine={false} width={36}
+                        domain={[dataMin=>Math.floor(dataMin*0.995), dataMax=>Math.ceil(dataMax*1.005)]}/>
+                      <Tooltip formatter={v=>[fmt(v),label]} contentStyle={{borderRadius:10,border:"none",fontFamily:"inherit",fontSize:11}}/>
+                      <Area type="monotone" dataKey={dataKey} stroke={color} fill={`url(#gh_mini_${dataKey})`} strokeWidth={2}/>
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              );
 
               return (
                 <div className="card">
@@ -1336,63 +1365,38 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* 통장별 + 카테고리 선택: 개별 미니 차트 */}
-                  {showSplitCharts ? (
-                    baseData.length < 2 ? (
-                      <div style={{textAlign:"center",padding:"24px 0",color:"#aaa",fontSize:13}}>📅 내역이 쌓이면 추이가 표시돼요</div>
-                    ) : (
-                      <div style={{display:"flex",flexDirection:"column",gap:16}}>
-                        {splitAccounts.map((acc, i) => {
-                          const accKey = String(acc.id);
-                          const color = focusCat.color;
-                          // 해당 통장 데이터가 있는지 확인
-                          const hasData = baseData.some(d => d[accKey] !== undefined && d[accKey] > 0);
-                          if (!hasData) return null;
-                          return (
-                            <div key={acc.id}>
-                              <div style={{fontSize:12,fontWeight:600,color:"#555",marginBottom:6,display:"flex",alignItems:"center",gap:6}}>
-                                <div style={{width:8,height:8,borderRadius:2,background:color,flexShrink:0}}/>
-                                {acc.name}
-                                <span style={{fontSize:11,color:"#bbb",fontWeight:400,marginLeft:"auto"}}>{fmtShort(acc.amount)}</span>
-                              </div>
-                              <ResponsiveContainer width="100%" height={120}>
-                                <AreaChart data={baseData} margin={{top:4,right:4,left:0,bottom:0}}>
-                                  <defs>
-                                    <linearGradient id={`gh_split_${accKey}`} x1="0" y1="0" x2="0" y2="1">
-                                      <stop offset="5%" stopColor={color} stopOpacity={0.3}/>
-                                      <stop offset="95%" stopColor={color} stopOpacity={0}/>
-                                    </linearGradient>
-                                  </defs>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE0"/>
-                                  <XAxis dataKey="_key" tick={{fontSize:9,fill:"#aaa"}} axisLine={false} tickLine={false} tickFormatter={tickFmt}/>
-                                  <YAxis tick={{fontSize:9,fill:"#aaa"}} tickFormatter={yFmt} axisLine={false} tickLine={false} width={36}
-                                    domain={[dataMin => Math.floor(dataMin * 0.995), dataMax => Math.ceil(dataMax * 1.005)]}/>
-                                  <Tooltip formatter={v=>[fmt(v), acc.name]} contentStyle={{borderRadius:10,border:"none",fontFamily:"inherit",fontSize:11}}/>
-                                  <Area type="monotone" dataKey={accKey} stroke={color} fill={`url(#gh_split_${accKey})`} strokeWidth={2}/>
-                                </AreaChart>
-                              </ResponsiveContainer>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )
+                  {baseData.length < 2 ? (
+                    <div style={{textAlign:"center",padding:"24px 0",color:"#aaa",fontSize:13}}>📅 내역이 쌓이면 추이가 표시돼요</div>
                   ) : (
-                    // 기존: 카테고리별 또는 통장별 전체 합산 차트
-                    baseData.length < 2 ? (
-                      <div style={{textAlign:"center",padding:"24px 0",color:"#aaa",fontSize:13}}>📅 내역이 쌓이면 추이가 표시돼요</div>
-                    ) : (
-                      <ResponsiveContainer width="100%" height={220}>
-                        <AreaChart data={baseData}>
-                          <defs>{lines.map(l=>(<linearGradient key={l.key} id={`gh_${l.key}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={l.color} stopOpacity={0.3}/><stop offset="95%" stopColor={l.color} stopOpacity={0}/></linearGradient>))}</defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE0"/>
-                          <XAxis dataKey="_key" tick={{fontSize:10,fill:"#aaa"}} axisLine={false} tickLine={false} tickFormatter={tickFmt}/>
-                          <YAxis tick={{fontSize:10,fill:"#aaa"}} tickFormatter={yFmt} axisLine={false} tickLine={false}/>
-                          <Tooltip formatter={(v,name)=>[fmt(v), lines.find(l=>l.key===name)?.label||name]} contentStyle={{borderRadius:12,border:"none",fontFamily:"inherit",fontSize:12}}/>
-                          <Legend formatter={name=>lines.find(l=>l.key===name)?.label||name}/>
-                          {lines.map(l=>(<Area key={l.key} type="monotone" dataKey={l.key} stackId={chartView==="category"?"1":undefined} stroke={l.color} fill={`url(#gh_${l.key})`} strokeWidth={2} name={l.key}/>))}
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    )
+                    <div style={{display:"flex",flexDirection:"column",gap:20}}>
+                      {/* 카테고리별: 카테고리마다 개별 미니 차트 */}
+                      {chartView==="category" && assetCats.map(c => {
+                        const hasData = baseData.some(d => d[c.label] != null && d[c.label] > 0);
+                        if (!hasData) return null;
+                        return <MiniChart key={c.id} dataKey={c.label} color={c.color} label={`${c.emoji} ${c.label}`} currentVal={catTotal(c)}/>;
+                      })}
+                      {/* 통장별 + 카테고리 선택: 통장마다 개별 미니 차트 */}
+                      {showSplitCharts && splitAccounts.map(acc => {
+                        const accKey = String(acc.id);
+                        const hasData = baseData.some(d => d[accKey] != null && d[accKey] > 0);
+                        if (!hasData) return null;
+                        return <MiniChart key={acc.id} dataKey={accKey} color={focusCat.color} label={acc.name} currentVal={acc.amount}/>;
+                      })}
+                      {/* 통장별 전체 합산: 기존 라인 차트 */}
+                      {chartView==="account" && !focusCat && (
+                        <ResponsiveContainer width="100%" height={220}>
+                          <AreaChart data={baseData}>
+                            <defs>{lines.map(l=>(<linearGradient key={l.key} id={`gh_${l.key}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={l.color} stopOpacity={0.3}/><stop offset="95%" stopColor={l.color} stopOpacity={0}/></linearGradient>))}</defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE0"/>
+                            <XAxis dataKey="_key" tick={{fontSize:10,fill:"#aaa"}} axisLine={false} tickLine={false} tickFormatter={tickFmt}/>
+                            <YAxis tick={{fontSize:10,fill:"#aaa"}} tickFormatter={yFmt} axisLine={false} tickLine={false}/>
+                            <Tooltip formatter={(v,name)=>[fmt(v), lines.find(l=>l.key===name)?.label||name]} contentStyle={{borderRadius:12,border:"none",fontFamily:"inherit",fontSize:12}}/>
+                            <Legend formatter={name=>lines.find(l=>l.key===name)?.label||name}/>
+                            {lines.map(l=>(<Area key={l.key} type="monotone" dataKey={l.key} stroke={l.color} fill={`url(#gh_${l.key})`} strokeWidth={2} name={l.key}/>))}
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      )}
+                    </div>
                   )}
                 </div>
               );
