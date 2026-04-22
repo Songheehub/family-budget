@@ -1075,7 +1075,7 @@ export default function App() {
             )}
 
             {(()=>{
-              const filteredAssetVal = selectedDashAssets.size===0 ? totalAssetValue : assetCats.filter(c=>selectedDashAssets.has(c.id)).reduce((s,c)=>s+catTotal(c),0);
+              const filteredAssetVal = selectedDashAssets.size===0 ? totalAssetValue : assetCats.filter(c=>selectedDashAssets.has(c.id)).reduce((s,c)=>s+catTotalIncluded(c),0);
               return (
                 <div className="card">
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
@@ -1092,7 +1092,7 @@ export default function App() {
                         <button key={c.id} onClick={()=>setSelectedDashAssets(prev=>{const next=new Set(prev);next.has(c.id)?next.delete(c.id):next.add(c.id);return next;})} className="chip"
                           style={{border:`1.5px solid ${active?c.color||ASSET_COLORS[i%7]:"#E5E0D5"}`,background:active?(c.color||ASSET_COLORS[i%7])+"18":"white",color:active?c.color||ASSET_COLORS[i%7]:"#888"}}>
                           {c.emoji} {c.label}
-                          <span style={{fontSize:11,fontWeight:700,marginLeft:4}}>{fmtShort(catTotal(c))}</span>
+                          <span style={{fontSize:11,fontWeight:700,marginLeft:4}}>{fmtShort(catTotalIncluded(c))}</span>
                         </button>
                       );
                     })}
@@ -1124,8 +1124,8 @@ export default function App() {
                       <div style={{fontSize:11,color:"#aaa",marginTop:2}}>{cat.accounts.length}개 계좌</div>
                     </div>
                     <div style={{textAlign:"right"}}>
-                      <div style={{fontSize:16,fontWeight:700,color:cat.color}}>{fmtShort(catTotal(cat))}</div>
-                      <div style={{fontSize:11,color:"#ccc",marginTop:2}}>전체의 {totalAssetValue?Math.round(catTotal(cat)/totalAssetValue*100):0}%</div>
+                      <div style={{fontSize:16,fontWeight:700,color:cat.color}}>{fmtShort(catTotalIncluded(cat))}</div>
+                      <div style={{fontSize:11,color:"#ccc",marginTop:2}}>전체의 {totalAssetValue?Math.round(catTotalIncluded(cat)/totalAssetValue*100):0}%</div>
                     </div>
                     <span style={{fontSize:12,color:"#ccc",marginLeft:4}}>{expanded?"▲":"▼"}</span>
                   </div>
@@ -1520,7 +1520,7 @@ export default function App() {
           <div className="up" style={{display:"flex",flexDirection:"column",gap:13}}>
             <div style={{background:"linear-gradient(135deg,#E07A5F,#C4614A)",borderRadius:20,padding:"18px 22px",color:"white"}}>
               <div style={{fontSize:11,opacity:.8,marginBottom:3}}>매월 고정 지출</div>
-              <div style={{fontSize:28,fontWeight:700}}>{fmtShort(recurringItems.filter(r=>r.active!==false&&r.type==="expense"&&(r.day||1)<=now.getDate()).reduce((s,r)=>s+r.amount,0))}</div>
+              <div style={{fontSize:28,fontWeight:700}}>{fmtShort(recurringItems.filter(r=>r.active!==false&&r.type==="expense").reduce((s,r)=>s+r.amount,0))}</div>
               <div style={{fontSize:12,opacity:.75,marginTop:4}}>{recurringItems.filter(r=>r.active!==false).length}개 항목 · 매달 자동 적용</div>
             </div>
             <div className="card" style={{padding:0,overflow:"hidden"}}>
