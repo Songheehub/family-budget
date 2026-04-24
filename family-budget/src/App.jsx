@@ -478,6 +478,84 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
   );
 }
 
+function ReconView({ assetCats, transactions, accountHistory, members, now }) {
+  const [reconOffset, setReconOffset] = useState(0);
+  const reconDate = new Date(now.getFullYear(), now.getMonth() + reconOffset, 1);
+  const reconMonth = `${reconDate.getFullYear()}-${String(reconDate.getMonth()+1).padStart(2,"0")}`;
+  const reconMonthLabel = `${reconDate.getFullYear()}년 ${reconDate.getMonth()+1}월`;
+  const isReconCurrent = reconOffset === 0;
+  const nextMonthStr = `${reconDate.getFullYear()}-${String(reconDate.getMonth()+2).padStart(2,"0")}`;
+
+  const prevSnap = [...(accountHistory||[])].filter(h=>h.date<reconMonth+"-01").sort((a,b)=>b.date.localeCompare(a.date))[0];
+  const endSnap  = isReconCurrent ? null : [...(accountHistory||[])].filter(h=>h.date>=reconMonth+"-01"&&h.date<nextMonthStr+"-01").sort((a,b)=>b.date.localeCompare(a.date))[0];
+
+  return (
+    <div className="card" style={{padding:0,overflow:"hidden"}}>
+      <div style={{padding:"14px 18px 12px",borderBottom:"1px solid #F5F0E8"}}>
+        <div style={{fontSize:14,fontWeight:700,marginBottom:10}}>📒 월별 통장 잔액 추적</div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <button onClick={()=>setReconOffset(o=>o-1)} style={{background:"#F0EBE0",border:"none",borderRadius:8,padding:"5px 12px",fontSize:15,cursor:"pointer",color:"#555"}}>‹</button>
+          <span style={{fontSize:13,fontWeight:600}}>{reconMonthLabel} {isReconCurrent&&<span style={{fontSize:11,color:"#4A6FA5",fontWeight:400}}>이번 달</span>}</span>
+          <button onClick={()=>setReconOffset(o=>Math.min(0,o+1))} disabled={isReconCurrent}
+            style={{background:isReconCurrent?"#F5F0E8":"#F0EBE0",border:"none",borderRadius:8,padding:"5px 12px",fontSize:15,cursor:isReconCurrent?"default":"pointer",color:isReconCurrent?"#ccc":"#555"}}>›</button>
+        </div>
+      </div>
+      {assetCats.flatMap(cat=>cat.accounts.map(acc=>{
+        const aid = String(acc.id);
+        const prevBal = prevSnap?.[aid]??null;
+        const endBal  = isReconCurrent ? acc.amount : (endSnap?.[aid]??null);
+        const accTxs  = transactions.filter(t=>t.date.startsWith(reconMonth)&&String(t.accountId)===aid&&!t.isTransferIn).sort((a,b)=>a.date.localeCompare(b.date)||a.id-b.id);
+        const totalIn  = accTxs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
+        const totalOut = accTxs.filter(t=>(t.type==="expense"&&!t.isTransfer)||t.isCardSettle||(t.isTransfer&&!t.isTransferIn)).reduce((s,t)=>s+t.amount,0);
+        const calcBal  = prevBal!=null ? prevBal+totalIn-totalOut : null;
+        const diff     = (calcBal!=null&&endBal!=null) ? endBal-calcBal : null;
+        const hasIssue = diff!=null && Math.abs(diff)>0;
+        return (
+          <details key={acc.id} style={{borderBottom:"1px solid #F5F0E8"}}>
+            <summary style={{display:"flex",alignItems:"center",gap:10,padding:"11px 18px",cursor:"pointer",listStyle:"none",userSelect:"none",background:hasIssue?"#FFF8F0":"white"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:600,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                  <span style={{color:"#555"}}>{cat.emoji} {acc.name}</span>
+                  {hasIssue&&<span style={{fontSize:10,background:"#FFF0EE",color:"#E07A5F",padding:"2px 6px",borderRadius:10,fontWeight:600}}>⚠ 차이 발생</span>}
+                </div>
+                <div style={{fontSize:11,color:"#bbb",marginTop:2,display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {prevBal!=null?<span>전월말 {fmt(prevBal)}</span>:<span>전월 스냅샷 없음</span>}
+                  {totalIn>0&&<span style={{color:"#3BB273"}}>▲{fmt(totalIn)}</span>}
+                  {totalOut>0&&<span style={{color:"#E07A5F"}}>▼{fmt(totalOut)}</span>}
+                </div>
+              </div>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                {calcBal!=null&&<div style={{fontSize:11,color:hasIssue?"#E07A5F":"#3BB273",fontWeight:600}}>계산 {fmt(calcBal)}</div>}
+                <div style={{fontSize:13,fontWeight:700,color:hasIssue?"#E07A5F":"#2A2A2A"}}>실제 {endBal!=null?fmt(endBal):"-"}</div>
+                {hasIssue&&<div style={{fontSize:11,color:"#E07A5F",fontWeight:600}}>차이 {diff>0?"+":""}{fmt(diff)}</div>}
+              </div>
+              <span style={{fontSize:11,color:"#ccc"}}>▼</span>
+            </summary>
+            <div style={{background:"#FAFAF7",padding:"6px 18px 10px"}}>
+              {accTxs.length===0?(
+                <div style={{fontSize:11,color:"#bbb",padding:"6px 0"}}>이 통장에 연결된 내역 없음</div>
+              ):accTxs.map(t=>{
+                const isOut=(t.type==="expense"&&!t.isTransfer)||t.isCardSettle||(t.isTransfer&&!t.isTransferIn);
+                const mem=members.find(m=>m.id===t.member);
+                return (
+                  <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid #F0EBE0",fontSize:11}}>
+                    <span style={{color:"#aaa",width:42,flexShrink:0}}>{t.date.slice(5)}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#444"}}>{t.memo||t.category}</div>
+                      <div style={{color:"#bbb"}}>{mem?.emoji}{mem?.name}{t.isCardSettle?" · 카드정산":""}{t.isTransfer?" · 이체":""}{t.isRecurring?" · 고정":""}</div>
+                    </div>
+                    <span style={{fontWeight:600,color:isOut?"#E07A5F":"#3BB273",whiteSpace:"nowrap"}}>{isOut?"-":"+"}{fmt(t.amount)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </details>
+        );
+      }))}
+    </div>
+  );
+}
+
 export default function App() {
   const [setup, setSetup] = useState(null);
   const [tab, setTab] = useState("dashboard");
@@ -1433,56 +1511,8 @@ export default function App() {
               </details>
             </div>
 
-            {/* 잔액 검증 */}
-            <div className="card" style={{padding:"12px 16px"}}>
-              <details>
-                <summary style={{cursor:"pointer",fontSize:13,fontWeight:600,color:"#555",userSelect:"none"}}>
-                  🔍 통장 잔액 검증
-                </summary>
-                <div style={{fontSize:11,color:"#aaa",margin:"8px 0"}}>
-                  내역 기반으로 계산한 잔액과 현재 저장된 잔액을 비교해요
-                </div>
-                {assetCats.flatMap(cat => cat.accounts.map(acc => {
-                  // 해당 통장에 영향을 준 모든 내역
-                  const accTxs = transactions.filter(t => String(t.accountId) === String(acc.id) && !t.isTransferIn);
-                  // 계산상 잔액 = 저장된 잔액에서 내역을 역산할 수 없으므로
-                  // 대신 내역 목록을 보여줘서 이상한 것 찾을 수 있게 함
-                  const totalIn  = accTxs.filter(t=>t.type==="income"||(t.isTransfer&&t.isTransferIn)).reduce((s,t)=>s+t.amount,0);
-                  const totalOut = accTxs.filter(t=>(t.type==="expense"&&!t.isCardSettle&&!t.isTransfer)||(t.isCardSettle)||(t.isTransfer&&!t.isTransferIn)).reduce((s,t)=>s+t.amount,0);
-                  return (
-                    <details key={acc.id} style={{marginBottom:8}}>
-                      <summary style={{cursor:"pointer",padding:"8px 10px",background:"#FAFAF7",borderRadius:8,fontSize:12,fontWeight:500,userSelect:"none",display:"flex",justifyContent:"space-between",listStyle:"none"}}>
-                        <span>{cat.emoji} {acc.name}</span>
-                        <span style={{fontWeight:700,color:"#2A2A2A"}}>{fmt(acc.amount)}</span>
-                      </summary>
-                      <div style={{paddingLeft:8,marginTop:4,maxHeight:240,overflowY:"auto"}}>
-                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8,padding:"6px 8px",background:"#F0F7FF",borderRadius:7}}>
-                          <div style={{fontSize:11,color:"#3BB273"}}>💚 입금 합계<br/><b>{fmt(totalIn)}</b></div>
-                          <div style={{fontSize:11,color:"#E07A5F"}}>🔴 출금 합계<br/><b>{fmt(totalOut)}</b></div>
-                        </div>
-                        {accTxs.length === 0 ? (
-                          <div style={{fontSize:11,color:"#bbb",padding:"4px 8px"}}>연결된 내역 없음</div>
-                        ) : [...accTxs].sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id).map(t=>{
-                          const isOut = (t.type==="expense"&&!t.isTransfer)||(t.isCardSettle)||(t.isTransfer&&!t.isTransferIn);
-                          const mem = members.find(m=>m.id===t.member);
-                          return (
-                            <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",borderBottom:"1px solid #F5F0E8",fontSize:11}}>
-                              <div style={{flex:1,minWidth:0}}>
-                                <div style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#444"}}>{t.memo||t.category}</div>
-                                <div style={{color:"#bbb"}}>{t.date} · {mem?.emoji}{mem?.name}{t.isCardSettle?" · 카드정산":""}{t.isTransfer?" · 이체":""}{t.isRecurring?" · 고정":""}</div>
-                              </div>
-                              <span style={{fontWeight:600,color:isOut?"#E07A5F":"#3BB273",whiteSpace:"nowrap"}}>
-                                {isOut?"-":"+"}{fmt(t.amount)}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </details>
-                  );
-                }))}
-              </details>
-            </div>
+            {/* 월별 통장 잔액 추적 */}
+            <ReconView assetCats={assetCats} transactions={transactions} accountHistory={accountHistory} members={members} now={now}/>
           </div>
         )}
 
