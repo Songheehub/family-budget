@@ -491,6 +491,8 @@ export default function App() {
   const [showBulkCardModal, setShowBulkCardModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState(null);
   const [txMonthOffset, setTxMonthOffset] = useState(0);
+  const [txSearch, setTxSearch] = useState("");
+  const [selectedAnalysisCat, setSelectedAnalysisCat] = useState(null);
   const [expandedCat, setExpandedCat] = useState({});
   const [chartView, setChartView] = useState("category");
   const [chartPeriod, setChartPeriod] = useState("monthly");
@@ -692,6 +694,7 @@ export default function App() {
     return [...transactions]
       .filter(t => t.date.startsWith(selMonth))
       .filter(t => !selectedMember || t.member === selectedMember)
+      .filter(t => !txSearch.trim() || t.memo?.includes(txSearch.trim()) || t.category?.includes(txSearch.trim()))
       .sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
   }, [transactions, selectedMember, txMonthOffset]);
 
@@ -1447,6 +1450,16 @@ export default function App() {
                 style={{background:isTxCurrentMonth?"#F5F0E8":"#F0EBE0",border:"none",borderRadius:8,padding:"6px 14px",fontSize:16,cursor:isTxCurrentMonth?"default":"pointer",color:isTxCurrentMonth?"#ccc":"#555",lineHeight:1}}
                 disabled={isTxCurrentMonth}>›</button>
             </div>
+            {/* 검색창 */}
+            <div style={{position:"relative"}}>
+              <input className="inp" placeholder="🔍 메모 또는 카테고리 검색" value={txSearch}
+                onChange={e=>setTxSearch(e.target.value)}
+                style={{paddingLeft:14,paddingRight:txSearch?36:14}}/>
+              {txSearch && (
+                <button onClick={()=>setTxSearch("")}
+                  style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"#bbb",fontSize:16,cursor:"pointer",lineHeight:1}}>✕</button>
+              )}
+            </div>
             <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
               <button onClick={()=>setSelectedMember(null)} className="chip" style={{border:`1.5px solid ${!selectedMember?"#4A6FA5":"#E5E0D5"}`,background:!selectedMember?"#EEF2F9":"white",color:!selectedMember?"#4A6FA5":"#666"}}>전체</button>
               {members.map((m,i)=>(
@@ -1614,19 +1627,45 @@ export default function App() {
               <div style={{fontSize:12,color:"#aaa",marginBottom:16}}>저축률 {totalIncome?Math.round((balance/totalIncome)*100):0}%</div>
               {categoryData.length===0 ? (
                 <div style={{textAlign:"center",padding:30,color:"#aaa",fontSize:13}}>이번 달 지출 내역이 없어요</div>
-              ) : (
+              ) : (<>
                 <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={categoryData} layout="vertical" margin={{left:0,right:20}}>
+                  <BarChart data={categoryData} layout="vertical" margin={{left:0,right:20}}
+                    onClick={d=>d?.activePayload && setSelectedAnalysisCat(p=>p===d.activePayload[0]?.payload?.name?null:d.activePayload[0]?.payload?.name)}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE0" horizontal={false}/>
                     <XAxis type="number" tick={{fontSize:10,fill:"#aaa"}} tickFormatter={v=>`${Math.round(v/10000)}만`} axisLine={false} tickLine={false}/>
                     <YAxis type="category" dataKey="name" tick={{fontSize:12}} axisLine={false} tickLine={false} width={45} tickFormatter={v=>`${CATEGORIES[v]?.emoji||""} ${v}`}/>
                     <Tooltip formatter={v=>fmt(v)} contentStyle={{borderRadius:12,border:"none",fontFamily:"inherit",fontSize:12}}/>
-                    <Bar dataKey="value" radius={[0,6,6,0]}>
-                      {categoryData.map((d,i)=><Cell key={i} fill={d.color||ASSET_COLORS[i%7]}/>)}
+                    <Bar dataKey="value" radius={[0,6,6,0]} cursor="pointer">
+                      {categoryData.map((d,i)=><Cell key={i} fill={d.color||ASSET_COLORS[i%7]} opacity={selectedAnalysisCat&&selectedAnalysisCat!==d.name?0.35:1}/>)}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
-              )}
+                {selectedAnalysisCat && (()=>{
+                  const catInfo = CATEGORIES[selectedAnalysisCat]||{};
+                  const catTxs = monthTx.filter(t=>t.type==="expense"&&!t.isCardSettle&&t.category===selectedAnalysisCat)
+                    .sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);
+                  return (
+                    <div style={{marginTop:12,borderTop:"1px solid #F5F0E8",paddingTop:12}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                        <span style={{fontSize:13,fontWeight:600}}>{catInfo.emoji} {selectedAnalysisCat} · {catTxs.length}건 · {fmt(catTxs.reduce((s,t)=>s+t.amount,0))}</span>
+                        <button onClick={()=>setSelectedAnalysisCat(null)} style={{background:"none",border:"none",color:"#bbb",fontSize:14,cursor:"pointer"}}>✕</button>
+                      </div>
+                      {catTxs.map(t=>{
+                        const mem=members.find(m=>m.id===t.member);
+                        return (
+                          <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #F8F4EF"}}>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:13,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.memo||"-"}</div>
+                              <div style={{fontSize:11,color:"#bbb",marginTop:1}}>{t.date} · {mem?.emoji}{mem?.name}</div>
+                            </div>
+                            <span style={{fontSize:13,fontWeight:700,color:"#E07A5F",whiteSpace:"nowrap"}}>{fmt(t.amount)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </>)}
             </div>
             <div className="card">
               <div style={{fontSize:14,fontWeight:700,marginBottom:16}}>멤버별 지출 비교</div>
