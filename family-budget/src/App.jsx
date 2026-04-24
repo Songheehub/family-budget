@@ -696,7 +696,7 @@ export default function App() {
       .filter(t => !selectedMember || t.member === selectedMember)
       .filter(t => !txSearch.trim() || t.memo?.includes(txSearch.trim()) || t.category?.includes(txSearch.trim()))
       .sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
-  }, [transactions, selectedMember, txMonthOffset]);
+  }, [transactions, selectedMember, txMonthOffset, txSearch]);
 
   const buildSnapshot = (newCats, prevSetup, removeDateEntry = null) => {
     const todayStr = now.toISOString().slice(0,10);
