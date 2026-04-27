@@ -478,65 +478,88 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
   );
 }
 
-function ReconView({ assetCats, transactions, accountHistory, members, now }) {
-  const [reconOffset, setReconOffset] = useState(0);
-  const reconDate = new Date(now.getFullYear(), now.getMonth() + reconOffset, 1);
-  const reconMonth = `${reconDate.getFullYear()}-${String(reconDate.getMonth()+1).padStart(2,"0")}`;
-  const reconMonthLabel = `${reconDate.getFullYear()}년 ${reconDate.getMonth()+1}월`;
-  const isReconCurrent = reconOffset === 0;
-  const nextMonthStr = `${reconDate.getFullYear()}-${String(reconDate.getMonth()+2).padStart(2,"0")}`;
+function ReconView({ assetCats, transactions, baseline, members, now, onSaveBaseline }) {
+  if (!baseline) {
+    return (
+      <div className="card" style={{textAlign:"center",padding:"24px 16px"}}>
+        <div style={{fontSize:28,marginBottom:10}}>📒</div>
+        <div style={{fontSize:14,fontWeight:700,marginBottom:6}}>통장 잔액 추적</div>
+        <div style={{fontSize:12,color:"#aaa",marginBottom:16,lineHeight:1.7}}>
+          지금 잔액을 기준점으로 저장하면<br/>이후 입력한 내역을 기반으로<br/>예상 잔액을 계산해드려요
+        </div>
+        <button onClick={onSaveBaseline}
+          style={{background:"#4A6FA5",color:"white",border:"none",borderRadius:11,padding:"11px 24px",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+          지금 잔액을 기준점으로 저장
+        </button>
+      </div>
+    );
+  }
 
-  const prevSnap = [...(accountHistory||[])].filter(h=>h.date<reconMonth+"-01").sort((a,b)=>b.date.localeCompare(a.date))[0];
-  const endSnap  = isReconCurrent ? null : [...(accountHistory||[])].filter(h=>h.date>=reconMonth+"-01"&&h.date<nextMonthStr+"-01").sort((a,b)=>b.date.localeCompare(a.date))[0];
+  const baseDate = baseline.date;
 
   return (
     <div className="card" style={{padding:0,overflow:"hidden"}}>
-      <div style={{padding:"14px 18px 12px",borderBottom:"1px solid #F5F0E8"}}>
-        <div style={{fontSize:14,fontWeight:700,marginBottom:10}}>📒 월별 통장 잔액 추적</div>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <button onClick={()=>setReconOffset(o=>o-1)} style={{background:"#F0EBE0",border:"none",borderRadius:8,padding:"5px 12px",fontSize:15,cursor:"pointer",color:"#555"}}>‹</button>
-          <span style={{fontSize:13,fontWeight:600}}>{reconMonthLabel} {isReconCurrent&&<span style={{fontSize:11,color:"#4A6FA5",fontWeight:400}}>이번 달</span>}</span>
-          <button onClick={()=>setReconOffset(o=>Math.min(0,o+1))} disabled={isReconCurrent}
-            style={{background:isReconCurrent?"#F5F0E8":"#F0EBE0",border:"none",borderRadius:8,padding:"5px 12px",fontSize:15,cursor:isReconCurrent?"default":"pointer",color:isReconCurrent?"#ccc":"#555"}}>›</button>
+      <div style={{padding:"14px 18px 12px",borderBottom:"1px solid #F5F0E8",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div>
+          <div style={{fontSize:14,fontWeight:700}}>📒 통장 잔액 추적</div>
+          <div style={{fontSize:11,color:"#bbb",marginTop:2}}>기준점: {baseDate} · 이후 내역 기반 계산</div>
         </div>
+        <button onClick={onSaveBaseline}
+          style={{background:"#F0EBE0",border:"none",borderRadius:9,padding:"6px 11px",fontSize:11,color:"#888",cursor:"pointer",fontFamily:"inherit"}}>
+          기준점 갱신
+        </button>
       </div>
-      {assetCats.flatMap(cat=>cat.accounts.map(acc=>{
+
+      {assetCats.flatMap(cat => cat.accounts.map(acc => {
         const aid = String(acc.id);
-        const prevBal = prevSnap?.[aid]??null;
-        const endBal  = isReconCurrent ? acc.amount : (endSnap?.[aid]??null);
-        const accTxs  = transactions.filter(t=>t.date.startsWith(reconMonth)&&String(t.accountId)===aid&&!t.isTransferIn).sort((a,b)=>a.date.localeCompare(b.date)||a.id-b.id);
-        const totalIn  = accTxs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
-        const totalOut = accTxs.filter(t=>(t.type==="expense"&&!t.isTransfer)||t.isCardSettle||(t.isTransfer&&!t.isTransferIn)).reduce((s,t)=>s+t.amount,0);
-        const calcBal  = prevBal!=null ? prevBal+totalIn-totalOut : null;
-        const diff     = (calcBal!=null&&endBal!=null) ? endBal-calcBal : null;
-        const hasIssue = diff!=null && Math.abs(diff)>0;
+        const baseBal = baseline[aid] ?? null;
+
+        // 기준점 이후 이 통장 관련 내역
+        const accTxs = transactions.filter(t =>
+          t.date > baseDate &&
+          String(t.accountId) === aid
+        ).sort((a,b) => a.date.localeCompare(b.date) || a.id - b.id);
+
+        const totalIn  = accTxs.filter(t => t.type==="income" || t.isTransferIn).reduce((s,t)=>s+t.amount,0);
+        const totalOut = accTxs.filter(t => (t.type==="expense"&&!t.isTransfer) || t.isCardSettle || (t.isTransfer&&!t.isTransferIn)).reduce((s,t)=>s+t.amount,0);
+
+        const calcBal = baseBal != null ? baseBal + totalIn - totalOut : null;
+        const diff    = calcBal != null ? acc.amount - calcBal : null;
+        const hasIssue = diff != null && Math.abs(diff) > 0;
+
         return (
           <details key={acc.id} style={{borderBottom:"1px solid #F5F0E8"}}>
-            <summary style={{display:"flex",alignItems:"center",gap:10,padding:"11px 18px",cursor:"pointer",listStyle:"none",userSelect:"none",background:hasIssue?"#FFF8F0":"white"}}>
+            <summary style={{display:"flex",alignItems:"center",gap:10,padding:"12px 18px",cursor:"pointer",listStyle:"none",userSelect:"none",background:hasIssue?"#FFF8F0":"white"}}>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:13,fontWeight:600,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                   <span style={{color:"#555"}}>{cat.emoji} {acc.name}</span>
-                  {hasIssue&&<span style={{fontSize:10,background:"#FFF0EE",color:"#E07A5F",padding:"2px 6px",borderRadius:10,fontWeight:600}}>⚠ 차이 발생</span>}
+                  {hasIssue && <span style={{fontSize:10,background:"#FFF0EE",color:"#E07A5F",padding:"2px 6px",borderRadius:10,fontWeight:600}}>⚠ {diff>0?"+":""}{fmt(diff)} 차이</span>}
+                  {!hasIssue && calcBal!=null && <span style={{fontSize:10,background:"#E8F5EE",color:"#3BB273",padding:"2px 6px",borderRadius:10,fontWeight:600}}>✓ 일치</span>}
                 </div>
                 <div style={{fontSize:11,color:"#bbb",marginTop:2,display:"flex",gap:8,flexWrap:"wrap"}}>
-                  {prevBal!=null?<span>전월말 {fmt(prevBal)}</span>:<span>전월 스냅샷 없음</span>}
-                  {totalIn>0&&<span style={{color:"#3BB273"}}>▲{fmt(totalIn)}</span>}
-                  {totalOut>0&&<span style={{color:"#E07A5F"}}>▼{fmt(totalOut)}</span>}
+                  {baseBal!=null && <span>기준 {fmt(baseBal)}</span>}
+                  {totalIn>0  && <span style={{color:"#3BB273"}}>▲{fmt(totalIn)}</span>}
+                  {totalOut>0 && <span style={{color:"#E07A5F"}}>▼{fmt(totalOut)}</span>}
                 </div>
               </div>
               <div style={{textAlign:"right",flexShrink:0}}>
-                {calcBal!=null&&<div style={{fontSize:11,color:hasIssue?"#E07A5F":"#3BB273",fontWeight:600}}>계산 {fmt(calcBal)}</div>}
-                <div style={{fontSize:13,fontWeight:700,color:hasIssue?"#E07A5F":"#2A2A2A"}}>실제 {endBal!=null?fmt(endBal):"-"}</div>
-                {hasIssue&&<div style={{fontSize:11,color:"#E07A5F",fontWeight:600}}>차이 {diff>0?"+":""}{fmt(diff)}</div>}
+                {calcBal!=null && <div style={{fontSize:11,color:hasIssue?"#E07A5F":"#3BB273",fontWeight:600}}>예상 {fmt(calcBal)}</div>}
+                <div style={{fontSize:13,fontWeight:700,color:hasIssue?"#E07A5F":"#2A2A2A"}}>실제 {fmt(acc.amount)}</div>
               </div>
               <span style={{fontSize:11,color:"#ccc"}}>▼</span>
             </summary>
             <div style={{background:"#FAFAF7",padding:"6px 18px 10px"}}>
-              {accTxs.length===0?(
-                <div style={{fontSize:11,color:"#bbb",padding:"6px 0"}}>이 통장에 연결된 내역 없음</div>
-              ):accTxs.map(t=>{
-                const isOut=(t.type==="expense"&&!t.isTransfer)||t.isCardSettle||(t.isTransfer&&!t.isTransferIn);
-                const mem=members.find(m=>m.id===t.member);
+              {baseBal!=null && (
+                <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #F0EBE0",fontSize:11,color:"#888"}}>
+                  <span>📌 기준점 ({baseDate})</span>
+                  <span style={{fontWeight:600}}>{fmt(baseBal)}</span>
+                </div>
+              )}
+              {accTxs.length === 0 ? (
+                <div style={{fontSize:11,color:"#bbb",padding:"6px 0"}}>기준점 이후 연결된 내역 없음</div>
+              ) : accTxs.map(t => {
+                const isOut = (t.type==="expense"&&!t.isTransfer)||t.isCardSettle||(t.isTransfer&&!t.isTransferIn);
+                const mem = members.find(m=>m.id===t.member);
                 return (
                   <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid #F0EBE0",fontSize:11}}>
                     <span style={{color:"#aaa",width:42,flexShrink:0}}>{t.date.slice(5)}</span>
@@ -659,11 +682,11 @@ export default function App() {
         let newCats = [...setup.assetCats];
         autoTx.forEach(t => {
           if (t.isTransfer) {
-            if (!t.isTransferIn && t.accountId) newCats = newCats.map(c=>({...c,accounts:c.accounts.map(a=>String(a.id)===String(t.accountId)?{...a,amount:Math.max(0,(a.amount||0)-t.amount)}:a)}));
+            if (!t.isTransferIn && t.accountId) newCats = newCats.map(c=>({...c,accounts:c.accounts.map(a=>String(a.id)===String(t.accountId)?{...a,amount:(a.amount||0)-t.amount}:a)}));
             else if (t.isTransferIn && t.accountId) newCats = newCats.map(c=>({...c,accounts:c.accounts.map(a=>String(a.id)===String(t.accountId)?{...a,amount:(a.amount||0)+t.amount}:a)}));
           } else if (t.accountId) {
             const delta = t.type === "income" ? t.amount : -t.amount;
-            newCats = newCats.map(c=>({...c,accounts:c.accounts.map(a=>String(a.id)===String(t.accountId)?{...a,amount:Math.max(0,(a.amount||0)+delta)}:a)}));
+            newCats = newCats.map(c=>({...c,accounts:c.accounts.map(a=>String(a.id)===String(t.accountId)?{...a,amount:(a.amount||0)+delta}:a)}));
           }
         });
         const { assetHistory, accountHistory } = buildSnapshot(newCats, setup);
@@ -805,6 +828,15 @@ export default function App() {
     }));
   };
 
+  // 현재 잔액을 기준점으로 저장
+  const saveBaseline = () => {
+    const baseline = { date: now.toISOString().slice(0,10) };
+    assetCats.forEach(c => c.accounts.forEach(a => {
+      baseline[String(a.id)] = a.amount || 0;
+    }));
+    setSetup(s => ({ ...s, baseline }));
+  };
+
   const saveAssets = (newCats) => {
     setSetup(s => {
       const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
@@ -819,7 +851,7 @@ export default function App() {
       ...c,
       accounts: c.accounts.map(a =>
         String(a.id) === String(accountId)
-          ? { ...a, amount: Math.max(0, (a.amount||0) + delta) }
+          ? { ...a, amount: (a.amount||0) + delta }
           : a
       )
     }));
@@ -867,7 +899,28 @@ export default function App() {
     if (!txForm.amount || !txForm.member) return;
     const amt = parseInt(txForm.amount);
     if (editTxId) {
+      const oldTx = transactions.find(x => x.id === editTxId);
       setTransactions(prev => prev.map(x => x.id === editTxId ? { ...x, ...txForm, amount: amt, member: parseInt(txForm.member) } : x));
+      // 통장 잔액 차액 반영: 기존 효과 되돌리고 새 효과 적용
+      if (oldTx && !oldTx.cardId && !oldTx.isTransfer) {
+        const oldAccountId = oldTx.accountId || "";
+        const newAccountId = txForm.accountId || "";
+        setSetup(s => {
+          let newCats = s.assetCats;
+          // 기존 내역 효과 되돌리기
+          if (oldAccountId) {
+            const oldDelta = oldTx.type === "income" ? -oldTx.amount : oldTx.amount;
+            newCats = adjustAccount(newCats, oldAccountId, oldDelta);
+          }
+          // 새 내역 효과 적용
+          if (newAccountId) {
+            const newDelta = txForm.type === "income" ? amt : -amt;
+            newCats = adjustAccount(newCats, newAccountId, newDelta);
+          }
+          const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
+          return { ...s, assetCats: newCats, assetHistory, accountHistory };
+        });
+      }
       setEditTxId(null);
     } else {
       const tx = { id: Date.now(), ...txForm, amount: amt, member: parseInt(txForm.member) };
@@ -910,11 +963,11 @@ export default function App() {
         let newCats = [...s.assetCats];
         newTxs.forEach(t => {
           if (t.isTransfer) {
-            if (!t.isTransferIn && t.accountId) newCats = newCats.map(c=>({...c,accounts:c.accounts.map(a=>String(a.id)===String(t.accountId)?{...a,amount:Math.max(0,(a.amount||0)-t.amount)}:a)}));
+            if (!t.isTransferIn && t.accountId) newCats = newCats.map(c=>({...c,accounts:c.accounts.map(a=>String(a.id)===String(t.accountId)?{...a,amount:(a.amount||0)-t.amount}:a)}));
             else if (t.isTransferIn && t.accountId) newCats = newCats.map(c=>({...c,accounts:c.accounts.map(a=>String(a.id)===String(t.accountId)?{...a,amount:(a.amount||0)+t.amount}:a)}));
           } else if (t.accountId) {
             const delta = t.type==="income" ? t.amount : -t.amount;
-            newCats = newCats.map(c=>({...c,accounts:c.accounts.map(a=>String(a.id)===String(t.accountId)?{...a,amount:Math.max(0,(a.amount||0)+delta)}:a)}));
+            newCats = newCats.map(c=>({...c,accounts:c.accounts.map(a=>String(a.id)===String(t.accountId)?{...a,amount:(a.amount||0)+delta}:a)}));
           }
         });
         const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
@@ -1490,29 +1543,15 @@ export default function App() {
                 </div>
               );
             })()}
-            <div className="card" style={{padding:"12px 16px"}}>
-              <div style={{fontSize:12,color:"#aaa",marginBottom:8}}>💡 내역을 추가하거나 자산 수정 시 자동으로 추이가 기록돼요</div>
-              <details style={{fontSize:12}}>
-                <summary style={{cursor:"pointer",color:"#bbb",userSelect:"none"}}>🗑 차트 스냅샷 정리 ({(accountHistory||[]).length}개)</summary>
-                <div style={{marginTop:8,fontSize:11,color:"#aaa",marginBottom:6}}>
-                  잘못 찍힌 날짜를 삭제하면 차트에서 해당 구간이 제거돼요
-                </div>
-                <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:200,overflowY:"auto"}}>
-                  {(accountHistory||[]).length === 0 ? (
-                    <div style={{color:"#ccc",padding:"4px 8px"}}>스냅샷 없음</div>
-                  ) : [...(accountHistory||[])].sort((a,b)=>a.date.localeCompare(b.date)).map(h=>(
-                    <div key={h.date} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"5px 8px",background:"#FAFAF7",borderRadius:7}}>
-                      <span style={{color:"#555"}}>{h.date}</span>
-                      <button onClick={()=>removeAccountHistoryDate(h.date)}
-                        style={{background:"none",border:"none",color:"#E07A5F",fontSize:12,cursor:"pointer",padding:"2px 8px"}}>✕ 삭제</button>
-                    </div>
-                  ))}
-                </div>
-              </details>
-            </div>
-
-            {/* 월별 통장 잔액 추적 */}
-            <ReconView assetCats={assetCats} transactions={transactions} accountHistory={accountHistory} members={members} now={now}/>
+            <div className="card" style={{textAlign:"center",padding:16,color:"#aaa",fontSize:13}}>💡 내역을 추가하거나 자산 수정 시 자동으로 추이가 기록돼요</div>
+            <ReconView
+              assetCats={assetCats}
+              transactions={transactions}
+              baseline={setup?.baseline}
+              members={members}
+              now={now}
+              onSaveBaseline={saveBaseline}
+            />
           </div>
         )}
 
