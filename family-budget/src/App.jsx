@@ -232,9 +232,14 @@ function AssetEditModal({ assetCats: initCats, onSave, onClose }) {
           ))}
         </div>
         <button onClick={addCat} style={{width:"100%",padding:10,background:"#F5F0E8",border:"1.5px dashed #C8BFB0",borderRadius:12,color:"#888",fontSize:13,cursor:"pointer",fontFamily:"inherit",marginBottom:18}}>+ 카테고리 추가</button>
+        <div style={{background:"#FFF8F0",borderRadius:10,padding:"10px 13px",marginBottom:12,fontSize:12,color:"#888",lineHeight:1.6}}>
+          💡 <b style={{color:"#E07A5F"}}>처음부터 잘못 입력된 값</b>을 수정하는 경우<br/>
+          "과거 차트도 함께 수정"을 선택하면 모든 스냅샷이 새 값으로 교체돼요
+        </div>
         <div style={{display:"flex",gap:10}}>
           <button className="btn-g" style={{flex:1}} onClick={onClose}>취소</button>
-          <button className="btn-b" style={{flex:2}} onClick={()=>onSave(cats)}>저장하기</button>
+          <button className="btn-b" style={{flex:2,background:"#888",fontSize:13}} onClick={()=>onSave(cats, true)}>과거 차트도 함께 수정</button>
+          <button className="btn-b" style={{flex:2}} onClick={()=>onSave(cats, false)}>저장</button>
         </div>
       </div>
     </div>
@@ -837,10 +842,43 @@ export default function App() {
     setSetup(s => ({ ...s, baseline }));
   };
 
-  const saveAssets = (newCats) => {
+  const saveAssets = (newCats, fixHistory = false) => {
     setSetup(s => {
       const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
-      return { ...s, assetCats: newCats, assetHistory, accountHistory };
+      let newAssetHistory = assetHistory;
+      let newAccountHistory = accountHistory;
+      if (fixHistory) {
+        // 변경된 통장들의 id→새값 맵
+        const accMap = {};
+        newCats.forEach(c => c.accounts.forEach(a => { accMap[String(a.id)] = a.amount || 0; }));
+        const catMap = {};
+        newCats.forEach(c => { catMap[c.label] = catTotal(c); });
+        // 모든 과거 accountHistory 스냅샷에서 해당 통장 값을 새 값으로 교체
+        newAccountHistory = (s.accountHistory || []).map(h => {
+          const updated = { ...h };
+          Object.keys(accMap).forEach(aid => { if (aid in updated) updated[aid] = accMap[aid]; });
+          return updated;
+        });
+        // 오늘 스냅샷 추가/갱신
+        const todayStr = now.toISOString().slice(0,10);
+        const accEntry = { date: todayStr };
+        newCats.forEach(c => c.accounts.forEach(a => { accEntry[String(a.id)] = a.amount || 0; }));
+        newAccountHistory = newAccountHistory.some(h => h.date === todayStr)
+          ? newAccountHistory.map(h => h.date === todayStr ? accEntry : h)
+          : [...newAccountHistory, accEntry];
+        // assetHistory도 소급
+        newAssetHistory = (s.assetHistory || []).map(h => {
+          const updated = { ...h };
+          Object.keys(catMap).forEach(label => { if (label in updated) updated[label] = catMap[label]; });
+          return updated;
+        });
+        const todayEntry = { month: thisMonthLabel };
+        newCats.forEach(c => { todayEntry[c.label] = catTotal(c); });
+        newAssetHistory = newAssetHistory.some(h => h.month === thisMonthLabel)
+          ? newAssetHistory.map(h => h.month === thisMonthLabel ? todayEntry : h)
+          : [...newAssetHistory, todayEntry];
+      }
+      return { ...s, assetCats: newCats, assetHistory: newAssetHistory, accountHistory: newAccountHistory };
     });
     setShowAssetModal(false);
   };
