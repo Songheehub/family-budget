@@ -845,40 +845,61 @@ export default function App() {
   const saveAssets = (newCats, fixHistory = false) => {
     setSetup(s => {
       const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
-      let newAssetHistory = assetHistory;
-      let newAccountHistory = accountHistory;
-      if (fixHistory) {
-        // 변경된 통장들의 id→새값 맵
-        const accMap = {};
-        newCats.forEach(c => c.accounts.forEach(a => { accMap[String(a.id)] = a.amount || 0; }));
-        const catMap = {};
-        newCats.forEach(c => { catMap[c.label] = catTotal(c); });
-        // 모든 과거 accountHistory 스냅샷에서 해당 통장 값을 새 값으로 교체
-        newAccountHistory = (s.accountHistory || []).map(h => {
-          const updated = { ...h };
-          Object.keys(accMap).forEach(aid => { if (aid in updated) updated[aid] = accMap[aid]; });
-          return updated;
-        });
-        // 오늘 스냅샷 추가/갱신
-        const todayStr = now.toISOString().slice(0,10);
-        const accEntry = { date: todayStr };
-        newCats.forEach(c => c.accounts.forEach(a => { accEntry[String(a.id)] = a.amount || 0; }));
-        newAccountHistory = newAccountHistory.some(h => h.date === todayStr)
-          ? newAccountHistory.map(h => h.date === todayStr ? accEntry : h)
-          : [...newAccountHistory, accEntry];
-        // assetHistory도 소급
-        newAssetHistory = (s.assetHistory || []).map(h => {
-          const updated = { ...h };
-          Object.keys(catMap).forEach(label => { if (label in updated) updated[label] = catMap[label]; });
-          return updated;
-        });
-        const todayEntry = { month: thisMonthLabel };
-        newCats.forEach(c => { todayEntry[c.label] = catTotal(c); });
-        newAssetHistory = newAssetHistory.some(h => h.month === thisMonthLabel)
-          ? newAssetHistory.map(h => h.month === thisMonthLabel ? todayEntry : h)
-          : [...newAssetHistory, todayEntry];
+      if (!fixHistory) {
+        return { ...s, assetCats: newCats, assetHistory, accountHistory };
       }
-      return { ...s, assetCats: newCats, assetHistory: newAssetHistory, accountHistory: newAccountHistory };
+
+      // 변경된 통장만 찾기 (이전값 vs 새값 비교)
+      const changedAccounts = {}; // { aid: newAmount }
+      newCats.forEach(c => c.accounts.forEach(a => {
+        const oldCat = s.assetCats?.find(oc => oc.id === c.id);
+        const oldAcc = oldCat?.accounts?.find(oa => oa.id === a.id);
+        if (oldAcc && oldAcc.amount !== a.amount) {
+          changedAccounts[String(a.id)] = a.amount || 0;
+        }
+      }));
+
+      // 변경된 카테고리만 찾기
+      const changedCats = {};
+      newCats.forEach(c => {
+        const oldCat = s.assetCats?.find(oc => oc.id === c.id);
+        const oldTotal = oldCat ? catTotal(oldCat) : null;
+        const newTotal = catTotal(c);
+        if (oldTotal !== null && oldTotal !== newTotal) {
+          changedCats[c.label] = newTotal;
+        }
+      });
+
+      // 변경된 통장만 과거 스냅샷에 소급
+      const newAccountHistory = (s.accountHistory || []).map(h => {
+        const updated = { ...h };
+        Object.entries(changedAccounts).forEach(([aid, val]) => {
+          if (aid in updated) updated[aid] = val;
+        });
+        return updated;
+      });
+      const todayStr = now.toISOString().slice(0,10);
+      const accEntry = { date: todayStr };
+      newCats.forEach(c => c.accounts.forEach(a => { accEntry[String(a.id)] = a.amount || 0; }));
+      const finalAccHistory = newAccountHistory.some(h => h.date === todayStr)
+        ? newAccountHistory.map(h => h.date === todayStr ? accEntry : h)
+        : [...newAccountHistory, accEntry];
+
+      // 변경된 카테고리만 과거 assetHistory에 소급
+      const newAssetHistory = (s.assetHistory || []).map(h => {
+        const updated = { ...h };
+        Object.entries(changedCats).forEach(([label, val]) => {
+          if (label in updated) updated[label] = val;
+        });
+        return updated;
+      });
+      const todayEntry = { month: thisMonthLabel };
+      newCats.forEach(c => { todayEntry[c.label] = catTotal(c); });
+      const finalAssetHistory = newAssetHistory.some(h => h.month === thisMonthLabel)
+        ? newAssetHistory.map(h => h.month === thisMonthLabel ? todayEntry : h)
+        : [...newAssetHistory, todayEntry];
+
+      return { ...s, assetCats: newCats, assetHistory: finalAssetHistory, accountHistory: finalAccHistory };
     });
     setShowAssetModal(false);
   };
@@ -1581,24 +1602,7 @@ export default function App() {
                 </div>
               );
             })()}
-            <div className="card" style={{padding:"12px 16px"}}>
-              <div style={{fontSize:12,color:"#aaa",marginBottom:8}}>💡 내역을 추가하거나 자산 수정 시 자동으로 추이가 기록돼요</div>
-              <details style={{fontSize:12}}>
-                <summary style={{cursor:"pointer",color:"#bbb",userSelect:"none"}}>🗑 차트 스냅샷 정리 ({(accountHistory||[]).length}개)</summary>
-                <div style={{marginTop:8,fontSize:11,color:"#aaa",marginBottom:6}}>잘못 찍힌 날짜를 삭제하면 차트에서 해당 구간이 제거돼요</div>
-                <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:200,overflowY:"auto"}}>
-                  {(accountHistory||[]).length === 0 ? (
-                    <div style={{color:"#ccc",padding:"4px 8px"}}>스냅샷 없음</div>
-                  ) : [...(accountHistory||[])].sort((a,b)=>a.date.localeCompare(b.date)).map(h=>(
-                    <div key={h.date} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"5px 8px",background:"#FAFAF7",borderRadius:7}}>
-                      <span style={{color:"#555"}}>{h.date}</span>
-                      <button onClick={()=>removeAccountHistoryDate(h.date)}
-                        style={{background:"none",border:"none",color:"#E07A5F",fontSize:12,cursor:"pointer",padding:"2px 8px"}}>✕ 삭제</button>
-                    </div>
-                  ))}
-                </div>
-              </details>
-            </div>
+            <div className="card" style={{textAlign:"center",padding:16,color:"#aaa",fontSize:13}}>💡 내역을 추가하거나 자산 수정 시 자동으로 추이가 기록돼요</div>
             <ReconView
               assetCats={assetCats}
               transactions={transactions}
