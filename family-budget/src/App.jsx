@@ -1442,11 +1442,7 @@ export default function App() {
                 <div style={{fontSize:12,color:"#aaa",marginBottom:2}}>총 가족 자산</div>
                 <div style={{fontSize:26,fontWeight:700}}>{fmtShort(totalAssetValue)}</div>
               </div>
-              <div style={{display:"flex",gap:8}}>
-                <button onClick={()=>{if(window.confirm("내역 기반으로 자산 추이 차트를 재건할까요?\n잘못된 차트 데이터를 복구할 때 사용하세요.")) recoverHistory();}}
-                  style={{background:"#FFF0EE",border:"1.5px solid #F5C0B8",borderRadius:10,padding:"8px 12px",color:"#E07A5F",fontSize:12,fontWeight:600,cursor:"pointer"}}>🔧 차트 복구</button>
-                <button onClick={()=>setShowAssetModal(true)} style={{background:"#EEF2F9",border:"none",borderRadius:10,padding:"8px 13px",color:"#4A6FA5",fontSize:13,fontWeight:600,cursor:"pointer"}}>수정 ✏️</button>
-              </div>
+              <button onClick={()=>setShowAssetModal(true)} style={{background:"#EEF2F9",border:"none",borderRadius:10,padding:"8px 13px",color:"#4A6FA5",fontSize:13,fontWeight:600,cursor:"pointer"}}>수정 ✏️</button>
             </div>
             {assetCats.map((cat,ci)=>{
               const expanded = expandedCat[cat.id] === true;
