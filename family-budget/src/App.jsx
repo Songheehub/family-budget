@@ -833,6 +833,76 @@ export default function App() {
     }));
   };
 
+  // transactions 역산으로 accountHistory/assetHistory 복구
+  const recoverHistory = () => {
+    setSetup(s => {
+      const allAccounts = s.assetCats.flatMap(c => c.accounts.map(a => ({...a, catLabel: c.label, catColor: c.color, catEmoji: c.emoji})));
+
+      // 현재 잔액에서 모든 내역을 역산해서 초기 잔액 구하기
+      const initBal = {};
+      allAccounts.forEach(a => { initBal[String(a.id)] = a.amount || 0; });
+
+      // 모든 transactions을 역으로 적용
+      [...transactions].sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id).forEach(t => {
+        const aid = String(t.accountId);
+        if (!t.accountId || t.isTransferIn) return;
+        if (t.isCardSettle) {
+          initBal[aid] = (initBal[aid] || 0) + t.amount; // 정산 취소 → 복원
+        } else if (t.isTransfer && !t.isTransferIn) {
+          initBal[aid] = (initBal[aid] || 0) + t.amount; // 이체 출금 취소
+          const toAid = String(t.toAccountId);
+          if (toAid && initBal[toAid] !== undefined) initBal[toAid] = (initBal[toAid] || 0) - t.amount; // 이체 입금 취소
+        } else if (t.type === 'income') {
+          initBal[aid] = (initBal[aid] || 0) - t.amount;
+        } else if (t.type === 'expense') {
+          initBal[aid] = (initBal[aid] || 0) + t.amount;
+        }
+      });
+
+      // 기존 accountHistory의 날짜 목록 추출 (날짜는 살아있음)
+      const dates = [...new Set((s.accountHistory||[]).map(h => h.date))].sort();
+
+      // 각 날짜별 잔액 재계산
+      const newAccountHistory = dates.map(date => {
+        const bal = {...initBal};
+        [...transactions]
+          .filter(t => t.date <= date && t.accountId && !t.isTransferIn)
+          .sort((a,b) => a.date.localeCompare(b.date) || a.id - b.id)
+          .forEach(t => {
+            const aid = String(t.accountId);
+            if (t.isCardSettle) {
+              bal[aid] = (bal[aid] || 0) - t.amount;
+            } else if (t.isTransfer && !t.isTransferIn) {
+              bal[aid] = (bal[aid] || 0) - t.amount;
+              const toAid = String(t.toAccountId);
+              if (toAid && bal[toAid] !== undefined) bal[toAid] = (bal[toAid] || 0) + t.amount;
+            } else if (t.type === 'income') {
+              bal[aid] = (bal[aid] || 0) + t.amount;
+            } else if (t.type === 'expense') {
+              bal[aid] = (bal[aid] || 0) - t.amount;
+            }
+          });
+        return { date, ...bal };
+      });
+
+      // assetHistory도 월별로 재계산
+      const monthSet = [...new Set((s.assetHistory||[]).map(h => h.month))].sort();
+      const newAssetHistory = monthSet.map(month => {
+        const entry = { month };
+        const monthDate = month.replace('년 ', '-').replace('월', '').trim();
+        const [y, m] = monthDate.split('-').map(x => x.trim());
+        const lastDay = `${y}-${m.padStart(2,'0')}-31`;
+        const snap = newAccountHistory.filter(h => h.date <= lastDay).slice(-1)[0];
+        s.assetCats.forEach(c => {
+          entry[c.label] = c.accounts.reduce((sum, a) => sum + (snap?.[String(a.id)] || 0), 0);
+        });
+        return entry;
+      });
+
+      return { ...s, accountHistory: newAccountHistory, assetHistory: newAssetHistory };
+    });
+  };
+
   // 현재 잔액을 기준점으로 저장
   const saveBaseline = () => {
     const baseline = { date: now.toISOString().slice(0,10) };
@@ -840,6 +910,74 @@ export default function App() {
       baseline[String(a.id)] = a.amount || 0;
     }));
     setSetup(s => ({ ...s, baseline }));
+  };
+
+  // transactions 기반으로 accountHistory/assetHistory 재건
+  const rebuildHistory = () => {
+    setSetup(s => {
+      const allAccounts = s.assetCats.flatMap(c => c.accounts.map(a => ({...a, cat: c})));
+
+      // 가장 오래된 accountHistory 스냅샷을 초기값으로 사용
+      const oldestSnap = [...(s.accountHistory||[])].sort((a,b)=>a.date.localeCompare(b.date))[0];
+      if (!oldestSnap) return s;
+      const initDate = oldestSnap.date;
+
+      // 초기 잔액 맵
+      const initBal = {};
+      allAccounts.forEach(a => {
+        initBal[String(a.id)] = oldestSnap[String(a.id)] ?? a.amount ?? 0;
+      });
+
+      // 초기일 이후 트랜잭션을 날짜순 정렬
+      const txsSorted = [...transactions]
+        .filter(t => t.date >= initDate && !t.isTransferIn)
+        .sort((a,b) => a.date.localeCompare(b.date) || a.id - b.id);
+
+      // 날짜별 잔액 계산
+      const balances = {...initBal};
+      const snapsByDate = { [initDate]: {...balances} };
+
+      txsSorted.forEach(t => {
+        const aid = String(t.accountId||"");
+        if (!aid) return;
+        if (t.isTransfer && !t.isTransferIn) {
+          balances[aid] = (balances[aid]||0) - t.amount;
+          // 이체 입금 쌍 찾기
+          const pairTx = transactions.find(x => x.id === t.transferPair);
+          if (pairTx) balances[String(pairTx.accountId||"")] = (balances[String(pairTx.accountId||"")]||0) + t.amount;
+        } else if (t.isCardSettle) {
+          balances[aid] = (balances[aid]||0) - t.amount;
+        } else if (t.type === "income") {
+          balances[aid] = (balances[aid]||0) + t.amount;
+        } else if (t.type === "expense") {
+          balances[aid] = (balances[aid]||0) - t.amount;
+        }
+        snapsByDate[t.date] = {...balances};
+      });
+
+      // accountHistory 재건
+      const newAccountHistory = Object.entries(snapsByDate)
+        .sort(([a],[b]) => a.localeCompare(b))
+        .map(([date, bal]) => ({ date, ...bal }));
+
+      // assetHistory 재건 (월별 - 해당 월 마지막 스냅샷 기준)
+      const monthSnaps = {};
+      newAccountHistory.forEach(h => {
+        const mon = h.date.slice(0,7);
+        monthSnaps[mon] = h;
+      });
+      const newAssetHistory = Object.entries(monthSnaps)
+        .sort(([a],[b]) => a.localeCompare(b))
+        .map(([mon, snap]) => {
+          const entry = { month: `${mon.slice(0,4)}년 ${parseInt(mon.slice(5))}월` };
+          s.assetCats.forEach(c => {
+            entry[c.label] = c.accounts.reduce((sum, a) => sum + (snap[String(a.id)]||0), 0);
+          });
+          return entry;
+        });
+
+      return { ...s, accountHistory: newAccountHistory, assetHistory: newAssetHistory };
+    });
   };
 
   const saveAssets = (newCats, fixHistory = false) => {
@@ -1304,7 +1442,11 @@ export default function App() {
                 <div style={{fontSize:12,color:"#aaa",marginBottom:2}}>총 가족 자산</div>
                 <div style={{fontSize:26,fontWeight:700}}>{fmtShort(totalAssetValue)}</div>
               </div>
-              <button onClick={()=>setShowAssetModal(true)} style={{background:"#EEF2F9",border:"none",borderRadius:10,padding:"8px 13px",color:"#4A6FA5",fontSize:13,fontWeight:600,cursor:"pointer"}}>수정 ✏️</button>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>{if(window.confirm("내역 기반으로 자산 추이 차트를 재건할까요?\n잘못된 차트 데이터를 복구할 때 사용하세요.")) recoverHistory();}}
+                  style={{background:"#FFF0EE",border:"1.5px solid #F5C0B8",borderRadius:10,padding:"8px 12px",color:"#E07A5F",fontSize:12,fontWeight:600,cursor:"pointer"}}>🔧 차트 복구</button>
+                <button onClick={()=>setShowAssetModal(true)} style={{background:"#EEF2F9",border:"none",borderRadius:10,padding:"8px 13px",color:"#4A6FA5",fontSize:13,fontWeight:600,cursor:"pointer"}}>수정 ✏️</button>
+              </div>
             </div>
             {assetCats.map((cat,ci)=>{
               const expanded = expandedCat[cat.id] === true;
