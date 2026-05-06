@@ -376,7 +376,7 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
       amount: parseInt(p.amount)||0,
       category: p.category||"기타",
       memo: p.memo,
-      member: parseInt(memberId)||members[0]?.id,
+      member: parseInt(p.member||memberId)||members[0]?.id,
       cardId: cardId,
       accountId: "",
     }));
@@ -460,12 +460,16 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
                       {EXPENSE_CATEGORIES.map(c=><option key={c}>{c}</option>)}
                     </select>
                   </div>
-                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                     <input value={p.date} onChange={e=>setParsed(prev=>prev.map((x,j)=>j===i?{...x,date:e.target.value}:x))}
                       style={{fontSize:11,color:"#aaa",border:"none",background:"transparent",fontFamily:"inherit",width:90}}/>
                     <input type="number" value={p.amount} onChange={e=>setParsed(prev=>prev.map((x,j)=>j===i?{...x,amount:parseInt(e.target.value)||0}:x))}
                       style={{fontSize:13,fontWeight:700,color:"#E07A5F",border:"none",background:"transparent",fontFamily:"inherit",width:90,textAlign:"right"}}/>
                     <span style={{fontSize:12,color:"#E07A5F"}}>원</span>
+                    <select value={p.member||memberId} onChange={e=>setParsed(prev=>prev.map((x,j)=>j===i?{...x,member:e.target.value}:x))}
+                      style={{fontSize:11,border:"1px solid #E5E0D5",borderRadius:7,padding:"2px 6px",background:"white",fontFamily:"inherit",marginLeft:"auto"}}>
+                      {members.filter(m=>m.id!==9999).map(m=><option key={m.id} value={m.id}>{m.emoji} {m.name}</option>)}
+                    </select>
                   </div>
                 </div>
               </div>
