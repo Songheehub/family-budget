@@ -603,6 +603,7 @@ export default function App() {
   const [txMonthOffset, setTxMonthOffset] = useState(0);
   const [txSearch, setTxSearch] = useState("");
   const [selectedAnalysisCat, setSelectedAnalysisCat] = useState(null);
+  const [analysisMonthOffset, setAnalysisMonthOffset] = useState(0);
   const [expandedCat, setExpandedCat] = useState({});
   const [chartView, setChartView] = useState("category");
   const [chartPeriod, setChartPeriod] = useState("monthly");
@@ -1347,11 +1348,25 @@ export default function App() {
                         </div>
                       );
                     })}
-                    {donutData.length > 6 && <div style={{fontSize:11,color:"#bbb"}}>외 {donutData.length-6}개</div>}
+                    {donutData.length > 6 && (<>
+                      <div onClick={()=>setSelectedDashCat(p=>p==="__more__"?null:"__more__")}
+                        style={{fontSize:11,color:"#4A6FA5",cursor:"pointer",padding:"2px 4px",fontWeight:500}}>
+                        {selectedDashCat==="__more__"?"▲ 접기":`▼ 외 ${donutData.length-6}개 더보기`}
+                      </div>
+                      {selectedDashCat==="__more__" && donutData.slice(6).map((d,i)=>(
+                        <div key={d.name} onClick={()=>setSelectedDashCat(d.name)}
+                          style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",borderRadius:7,padding:"2px 4px",transition:"all .2s"}}>
+                          <div style={{width:8,height:8,borderRadius:2,background:d.color||ASSET_COLORS[(i+6)%7],flexShrink:0}}/>
+                          <span style={{fontSize:12,color:"#555",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.emoji} {d.name}</span>
+                          <span style={{fontSize:12,fontWeight:600,color:"#333",whiteSpace:"nowrap"}}>{fmtShort(d.value)}</span>
+                          <span style={{fontSize:10,color:"#bbb",width:28,textAlign:"right"}}>{dashExpense?Math.round(d.value/dashExpense*100):0}%</span>
+                        </div>
+                      ))}
+                    </>)}
                   </div>
                 </div>
-                {selectedDashCat && (() => {
-                  const catTxs = dashTx.filter(t=>t.type==="expense"&&t.category===selectedDashCat).sort((a,b)=>b.date.localeCompare(a.date));
+                {selectedDashCat && selectedDashCat !== "__more__" && (() => {
+                  const catTxs = dashTx.filter(t=>t.type==="expense"&&t.category===selectedDashCat&&!t.isCardSettle).sort((a,b)=>b.date.localeCompare(a.date));
                   const catInfo = EXPENSE_CATEGORIES[selectedDashCat]||{};
                   return (
                     <div style={{marginTop:14,borderTop:"1px solid #F5F0E8",paddingTop:12}}>
@@ -1941,29 +1956,57 @@ export default function App() {
           </div>
         )}
 
-        {tab==="analysis" && (
+        {tab==="analysis" && (()=>{
+          const anaDate = new Date(now.getFullYear(), now.getMonth() + analysisMonthOffset, 1);
+          const anaMonth = `${anaDate.getFullYear()}-${String(anaDate.getMonth()+1).padStart(2,"0")}`;
+          const anaMonthLabel = `${anaDate.getFullYear()}년 ${anaDate.getMonth()+1}월`;
+          const isAnaCurrent = analysisMonthOffset === 0;
+          const anaTx = transactions.filter(t => t.date.startsWith(anaMonth));
+          const anaIncome  = anaTx.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
+          const anaExpense = anaTx.filter(t=>t.type==="expense"&&!t.isCardSettle).reduce((s,t)=>s+t.amount,0);
+          const anaBalance = anaIncome - anaExpense;
+          const anaCatData = (() => {
+            const map={};
+            anaTx.filter(t=>t.type==="expense"&&!t.isCardSettle).forEach(t=>{map[t.category]=(map[t.category]||0)+t.amount;});
+            return Object.entries(map).map(([name,value])=>({name,value,...CATEGORIES[name]})).sort((a,b)=>b.value-a.value);
+          })();
+          const anaMemberExpense = members.map(m=>({...m,expense:anaTx.filter(t=>t.type==="expense"&&!t.isCardSettle&&t.member===m.id).reduce((s,t)=>s+t.amount,0)}));
+
+          return (
           <div className="up" style={{display:"flex",flexDirection:"column",gap:13}}>
+            {/* 월 네비게이션 */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"white",borderRadius:14,padding:"10px 16px",boxShadow:"0 2px 8px rgba(0,0,0,.05)"}}>
+              <button onClick={()=>{setAnalysisMonthOffset(o=>o-1);setSelectedAnalysisCat(null);}}
+                style={{background:"#F0EBE0",border:"none",borderRadius:8,padding:"6px 14px",fontSize:16,cursor:"pointer",color:"#555",lineHeight:1}}>‹</button>
+              <span style={{fontSize:15,fontWeight:700,color:"#2A2A2A"}}>
+                {anaMonthLabel} {isAnaCurrent && <span style={{fontSize:11,color:"#4A6FA5",fontWeight:400}}>이번 달</span>}
+              </span>
+              <button onClick={()=>{setAnalysisMonthOffset(o=>Math.min(0,o+1));setSelectedAnalysisCat(null);}}
+                style={{background:isAnaCurrent?"#F5F0E8":"#F0EBE0",border:"none",borderRadius:8,padding:"6px 14px",fontSize:16,cursor:isAnaCurrent?"default":"pointer",color:isAnaCurrent?"#ccc":"#555",lineHeight:1}}
+                disabled={isAnaCurrent}>›</button>
+            </div>
+
             <div className="card">
-              <div style={{fontSize:14,fontWeight:700,marginBottom:4}}>{thisMonthLabel} 분석</div>
-              <div style={{fontSize:12,color:"#aaa",marginBottom:16}}>저축률 {totalIncome?Math.round((balance/totalIncome)*100):0}%</div>
-              {categoryData.length===0 ? (
-                <div style={{textAlign:"center",padding:30,color:"#aaa",fontSize:13}}>이번 달 지출 내역이 없어요</div>
+              <div style={{fontSize:14,fontWeight:700,marginBottom:4}}>{anaMonthLabel} 분석</div>
+              <div style={{fontSize:12,color:"#aaa",marginBottom:16}}>저축률 {anaIncome?Math.round((anaBalance/anaIncome)*100):0}%</div>
+              {anaCatData.length===0 ? (
+                <div style={{textAlign:"center",padding:30,color:"#aaa",fontSize:13}}>지출 내역이 없어요</div>
               ) : (<>
                 <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={categoryData} layout="vertical" margin={{left:0,right:20}}
+                  <BarChart data={anaCatData} layout="vertical" margin={{left:0,right:20}}
                     onClick={d=>d?.activePayload && setSelectedAnalysisCat(p=>p===d.activePayload[0]?.payload?.name?null:d.activePayload[0]?.payload?.name)}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE0" horizontal={false}/>
                     <XAxis type="number" tick={{fontSize:10,fill:"#aaa"}} tickFormatter={v=>`${Math.round(v/10000)}만`} axisLine={false} tickLine={false}/>
                     <YAxis type="category" dataKey="name" tick={{fontSize:12}} axisLine={false} tickLine={false} width={45} tickFormatter={v=>`${CATEGORIES[v]?.emoji||""} ${v}`}/>
                     <Tooltip formatter={v=>fmt(v)} contentStyle={{borderRadius:12,border:"none",fontFamily:"inherit",fontSize:12}}/>
                     <Bar dataKey="value" radius={[0,6,6,0]} cursor="pointer">
-                      {categoryData.map((d,i)=><Cell key={i} fill={d.color||ASSET_COLORS[i%7]} opacity={selectedAnalysisCat&&selectedAnalysisCat!==d.name?0.35:1}/>)}
+                      {anaCatData.map((d,i)=><Cell key={i} fill={d.color||ASSET_COLORS[i%7]} opacity={selectedAnalysisCat&&selectedAnalysisCat!==d.name?0.35:1}/>)}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
                 {selectedAnalysisCat && (()=>{
                   const catInfo = CATEGORIES[selectedAnalysisCat]||{};
-                  const catTxs = monthTx.filter(t=>t.type==="expense"&&!t.isCardSettle&&t.category===selectedAnalysisCat)
+                  const catTxs = anaTx.filter(t=>t.type==="expense"&&!t.isCardSettle&&t.category===selectedAnalysisCat)
                     .sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);
                   return (
                     <div style={{marginTop:12,borderTop:"1px solid #F5F0E8",paddingTop:12}}>
@@ -1988,23 +2031,25 @@ export default function App() {
                 })()}
               </>)}
             </div>
+
             <div className="card">
               <div style={{fontSize:14,fontWeight:700,marginBottom:16}}>멤버별 지출 비교</div>
               <ResponsiveContainer width="100%" height={180}>
-                <BarChart data={memberExpense.filter(m=>m.id!==9999)}>
+                <BarChart data={anaMemberExpense.filter(m=>m.id!==9999)}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE0"/>
                   <XAxis dataKey="name" tick={{fontSize:12}} axisLine={false} tickLine={false}/>
                   <YAxis tick={{fontSize:10,fill:"#aaa"}} tickFormatter={v=>`${Math.round(v/10000)}만`} axisLine={false} tickLine={false}/>
                   <Tooltip formatter={v=>fmt(v)} contentStyle={{borderRadius:12,border:"none",fontFamily:"inherit",fontSize:12}}/>
                   <Bar dataKey="expense" radius={[6,6,0,0]}>
-                    {memberExpense.filter(m=>m.id!==9999).map((_,i)=><Cell key={i} fill={MEMBER_COLORS[i%6]}/>)}
+                    {anaMemberExpense.filter(m=>m.id!==9999).map((_,i)=><Cell key={i} fill={MEMBER_COLORS[i%6]}/>)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
+
             <div className="card">
               <div style={{fontSize:14,fontWeight:700,marginBottom:14}}>수지 요약</div>
-              {[["💚 총 수입",totalIncome,"#3BB273"],["🔴 총 지출",totalExpense,"#E07A5F"],["💰 잉여금",balance,balance>=0?"#3BB273":"#E07A5F"]].map(([l,v,c])=>(
+              {[["💚 총 수입",anaIncome,"#3BB273"],["🔴 총 지출",anaExpense,"#E07A5F"],["💰 잉여금",anaBalance,anaBalance>=0?"#3BB273":"#E07A5F"]].map(([l,v,c])=>(
                 <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid #F5F0E8"}}>
                   <span style={{fontSize:13,color:"#666"}}>{l}</span>
                   <span style={{fontSize:15,fontWeight:700,color:c}}>{v>=0?"+":""}{fmt(v)}</span>
@@ -2012,11 +2057,12 @@ export default function App() {
               ))}
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0"}}>
                 <span style={{fontSize:13,color:"#666"}}>📊 저축률</span>
-                <span style={{fontSize:15,fontWeight:700,color:"#4A6FA5"}}>{totalIncome?Math.round((balance/totalIncome)*100):0}%</span>
+                <span style={{fontSize:15,fontWeight:700,color:"#4A6FA5"}}>{anaIncome?Math.round((anaBalance/anaIncome)*100):0}%</span>
               </div>
             </div>
           </div>
-        )}
+          );
+        })()}
       </div>
 
       {showTxModal && (
