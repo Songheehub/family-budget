@@ -169,7 +169,7 @@ function SetupWizard({ onComplete }) {
 function AssetEditModal({ assetCats: initCats, onSave, onClose }) {
   const [cats, setCats] = useState(initCats.map(c=>({...c,accounts:c.accounts.map(a=>({...a}))})));
   const addAcc = (cid) => setCats(cats.map(c=>c.id===cid?{...c,accounts:[...c.accounts,{id:Date.now(),name:"",amount:0}]}:c));
-  const updAcc = (cid,aid,k,v) => setCats(cats.map(c=>c.id===cid?{...c,accounts:c.accounts.map(a=>a.id===aid?{...a,[k]:k==="amount"?(parseInt(v)||0):v}:a)}:c));
+  const updAcc = (cid,aid,k,v) => setCats(cats.map(c=>c.id===cid?{...c,accounts:c.accounts.map(a=>a.id===aid?{...a,[k]:k==="amount"?(v===""?0:parseInt(v)):v}:a)}:c));
   const delAcc = (cid,aid) => setCats(cats.map(c=>c.id===cid?{...c,accounts:c.accounts.filter(a=>a.id!==aid)}:c));
   const addCat = () => {
     const i = cats.length % ASSET_COLORS.length;
@@ -1377,12 +1377,12 @@ export default function App() {
                       {catTxs.map(t=>{
                         const mem=members.find(m=>m.id===t.member);
                         return (
-                          <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #F8F4EF"}}>
+                          <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #F8F4EF",opacity:t.isCardSettle?0.6:1}}>
                             <div style={{flex:1,minWidth:0}}>
                               <div style={{fontSize:13,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.memo}</div>
-                              <div style={{fontSize:11,color:"#bbb",marginTop:1}}>{t.date} · {mem?.emoji}{mem?.name}{t.cardId&&` · 💳${cards.find(c=>c.id===t.cardId)?.name||""}`}</div>
+                              <div style={{fontSize:11,color:"#bbb",marginTop:1}}>{t.date} · {mem?.emoji}{mem?.name}{t.cardId&&` · 💳${cards.find(c=>c.id===t.cardId)?.name||""}`}{t.isCardSettle&&" · 카드정산"}</div>
                             </div>
-                            <span style={{fontSize:13,fontWeight:700,color:"#E07A5F",whiteSpace:"nowrap"}}>-{fmt(t.amount)}</span>
+                            <span style={{fontSize:13,fontWeight:700,color:t.isCardSettle?"#bbb":"#E07A5F",whiteSpace:"nowrap"}}>-{fmt(t.amount)}</span>
                           </div>
                         );
                       })}
@@ -1458,7 +1458,9 @@ export default function App() {
           <div className="up" style={{display:"flex",flexDirection:"column",gap:13}}>
             <div className="card" style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div>
-                <div style={{fontSize:12,color:"#aaa",marginBottom:2}}>총 가족 자산</div>
+                <div style={{fontSize:12,color:"#aaa",marginBottom:2}}>
+                  {assetCats.some(c=>c.accounts.some(a=>a.amount<0)) ? "순자산 (자산 - 부채)" : "총 가족 자산"}
+                </div>
                 <div style={{fontSize:26,fontWeight:700}}>{fmtShort(totalAssetValue)}</div>
               </div>
               <button onClick={()=>setShowAssetModal(true)} style={{background:"#EEF2F9",border:"none",borderRadius:10,padding:"8px 13px",color:"#4A6FA5",fontSize:13,fontWeight:600,cursor:"pointer"}}>수정 ✏️</button>
@@ -1482,13 +1484,14 @@ export default function App() {
                   {expanded && (
                     <div style={{padding:"8px 13px 13px",display:"flex",flexDirection:"column",gap:7}}>
                       {cat.accounts.map(acc=>(
-                        <div key={acc.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 13px",background:acc.excluded?"#F5F5F5":"#FAFAF7",borderRadius:10,opacity:acc.excluded?0.5:1}}>
+                        <div key={acc.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 13px",background:acc.excluded?"#F5F5F5":acc.amount<0?"#FFF5F5":"#FAFAF7",borderRadius:10,opacity:acc.excluded?0.5:1}}>
                           <div style={{display:"flex",alignItems:"center",gap:9}}>
-                            <div style={{width:7,height:7,borderRadius:2,background:acc.excluded?"#ccc":cat.color,flexShrink:0}}/>
-                            <span style={{fontSize:13,color:acc.excluded?"#aaa":"#444"}}>{acc.name}</span>
+                            <div style={{width:7,height:7,borderRadius:2,background:acc.excluded?"#ccc":acc.amount<0?"#E07A5F":cat.color,flexShrink:0}}/>
+                            <span style={{fontSize:13,color:acc.excluded?"#aaa":acc.amount<0?"#E07A5F":"#444"}}>{acc.name}</span>
                             {acc.excluded && <span style={{fontSize:10,color:"#bbb",background:"#EFEFEF",padding:"1px 6px",borderRadius:10}}>합계 제외</span>}
+                            {acc.amount<0 && <span style={{fontSize:10,color:"#E07A5F",background:"#FFF0EE",padding:"1px 6px",borderRadius:10}}>부채</span>}
                           </div>
-                          <span style={{fontSize:14,fontWeight:700,color:acc.excluded?"#bbb":"#2A2A2A"}}>{fmt(acc.amount)}</span>
+                          <span style={{fontSize:14,fontWeight:700,color:acc.excluded?"#bbb":acc.amount<0?"#E07A5F":"#2A2A2A"}}>{fmt(acc.amount)}</span>
                         </div>
                       ))}
                       <button onClick={()=>setShowAssetModal(true)} style={{background:"none",border:`1.5px dashed ${cat.color}88`,borderRadius:9,padding:"7px",color:cat.color,fontSize:12,cursor:"pointer",width:"100%",fontFamily:"inherit",marginTop:2}}>✏️ 수정하기</button>
@@ -1611,13 +1614,44 @@ export default function App() {
                           {showSettled[uid] && settledRows.map(({ card, mon, amt }, si) => {
                             const [y, m] = mon.split("-");
                             const monLabel = `${parseInt(y)}년 ${parseInt(m)}월`;
+                            const settleKey = `settled-${card.id}-${mon}`;
+                            const isOpen = showUnsettled[settleKey];
+                            // 해당 카드+월 원래 지출 내역
+                            const settledTxs = transactions.filter(t =>
+                              String(t.cardId) === String(card.id) &&
+                              t.date.startsWith(mon) &&
+                              !t.isCardSettle &&
+                              !(card.excludedMemberIds?.includes(t.member))
+                            ).sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
                             return (
-                              <div key={`settled-${card.id}-${mon}-${si}`} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 18px 7px 60px",background:"#F6FBF7"}}>
-                                <div style={{flex:1,minWidth:0}}>
-                                  <div style={{fontSize:12,color:"#3BB273",fontWeight:500}}>{card.name}</div>
-                                  <div style={{fontSize:11,color:"#bbb"}}>{monLabel}</div>
+                              <div key={settleKey}>
+                                <div onClick={()=>setShowUnsettled(p=>({...p,[settleKey]:!isOpen}))}
+                                  style={{display:"flex",alignItems:"center",gap:10,padding:"7px 18px 7px 60px",background:"#F6FBF7",cursor:"pointer"}}>
+                                  <div style={{flex:1,minWidth:0}}>
+                                    <div style={{fontSize:12,color:"#3BB273",fontWeight:500}}>{card.name}</div>
+                                    <div style={{fontSize:11,color:"#bbb"}}>{monLabel} · {settledTxs.length}건 {isOpen?"▲":"▼"}</div>
+                                  </div>
+                                  <span style={{fontSize:13,fontWeight:600,color:"#3BB273"}}>✓ {fmt(amt)}</span>
                                 </div>
-                                <span style={{fontSize:13,fontWeight:600,color:"#3BB273"}}>✓ {fmt(amt)}</span>
+                                {isOpen && (
+                                  <div style={{background:"#F0FAF4",borderLeft:"3px solid #3BB273",marginLeft:60}}>
+                                    {settledTxs.length === 0 ? (
+                                      <div style={{padding:"8px 14px",fontSize:11,color:"#bbb"}}>내역 없음</div>
+                                    ) : settledTxs.map(t => {
+                                      const mem = members.find(m=>m.id===t.member);
+                                      return (
+                                        <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 14px",borderBottom:"1px solid #E8F5EE"}}>
+                                          <span style={{fontSize:13}}>{CATEGORIES[t.category]?.emoji||"📦"}</span>
+                                          <div style={{flex:1,minWidth:0}}>
+                                            <div style={{fontSize:12,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.memo}</div>
+                                            <div style={{fontSize:10,color:"#bbb"}}>{t.date} · {mem?.emoji}{mem?.name}</div>
+                                          </div>
+                                          <span style={{fontSize:12,fontWeight:600,color:"#E07A5F",whiteSpace:"nowrap"}}>{fmt(t.amount)}</span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                               </div>
                             );
                           })}
@@ -1686,7 +1720,7 @@ export default function App() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE0"/>
                       <XAxis dataKey="_key" tick={{fontSize:9,fill:"#aaa"}} axisLine={false} tickLine={false} tickFormatter={tickFmt}/>
                       <YAxis tick={{fontSize:9,fill:"#aaa"}} tickFormatter={yFmt} axisLine={false} tickLine={false} width={36}
-                        domain={[dataMin=>Math.floor(dataMin*0.995), dataMax=>Math.ceil(dataMax*1.005)]}/>
+                        domain={[dataMin => dataMin<0 ? Math.floor(dataMin*1.005) : Math.floor(dataMin*0.995), dataMax => dataMax<0 ? Math.ceil(dataMax*0.995) : Math.ceil(dataMax*1.005)]}/>
                       <Tooltip formatter={v=>[fmt(v),label]} contentStyle={{borderRadius:10,border:"none",fontFamily:"inherit",fontSize:11}}/>
                       <Area type="monotone" dataKey={dataKey} stroke={color} fill={`url(#gh_mini_${dataKey})`} strokeWidth={2}/>
                     </AreaChart>
