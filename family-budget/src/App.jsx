@@ -988,6 +988,22 @@ export default function App() {
       .sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
   }, [transactions, selectedMember, selectedAccountId, txMonthOffset, txSearch]);
 
+  // 거래 직후 통장 잔액: 현재 잔액에서 최신 거래부터 거꾸로 되돌려 계산
+  const balanceAfterMap = useMemo(()=>{
+    const map = {};
+    assetCats.forEach(c=>c.accounts.forEach(a=>{
+      let bal = a.amount;
+      const list = transactions.filter(t=>t.accountId && String(t.accountId)===String(a.id))
+        .sort((x,y)=>y.date.localeCompare(x.date) || y.id - x.id);
+      list.forEach(t=>{
+        map[t.id] = bal;
+        const eff = t.isTransfer ? (t.isTransferIn ? t.amount : -t.amount) : (t.type==="income" ? t.amount : -t.amount);
+        bal -= eff;
+      });
+    }));
+    return map;
+  }, [transactions, assetCats]);
+
   const buildSnapshot = (newCats, prevSetup, removeDateEntry = null) => {
     const todayStr = now.toISOString().slice(0,10);
     const entry = { month: thisMonthLabel };
@@ -1281,6 +1297,27 @@ export default function App() {
     const amt = parseInt(txForm.amount);
     if (editTxId) {
       const oldTx = transactions.find(x => x.id === editTxId);
+      if (oldTx && oldTx.isTransfer) {
+        // 이체 수정: 보내는/받는 내역 두 개를 함께 고치고, 차액만큼 양쪽 통장 잔액 반영
+        const diff = amt - oldTx.amount;
+        setTransactions(prev => prev.map(x =>
+          (x.id === oldTx.id || x.id === oldTx.transferPair)
+            ? { ...x, amount: amt, date: txForm.date, memo: txForm.memo || "이체" }
+            : x));
+        if (diff !== 0) {
+          const fromId = oldTx.isTransferIn ? oldTx.fromAccountId : oldTx.accountId;
+          const toId   = oldTx.isTransferIn ? oldTx.accountId : oldTx.toAccountId;
+          setSetup(s => {
+            let newCats = adjustAccount(s.assetCats, fromId, -diff);
+            newCats = adjustAccount(newCats, toId, diff);
+            const { assetHistory, accountHistory } = buildSnapshot(newCats, s);
+            return { ...s, assetCats: newCats, assetHistory, accountHistory };
+          });
+        }
+        setEditTxId(null);
+        setShowTxModal(false);
+        return;
+      }
       setTransactions(prev => prev.map(x => x.id === editTxId ? { ...x, ...txForm, amount: amt, member: parseInt(txForm.member) } : x));
       // 통장 잔액 차액 반영: 기존 효과 되돌리고 새 효과 적용
       if (oldTx && !oldTx.cardId && !oldTx.isTransfer) {
@@ -1922,6 +1959,11 @@ export default function App() {
                       <div style={{fontSize:11,color:"#aaa",marginTop:2}}>
                         {t.date} · {isTransfer ? `${fromAcc?.name||"?"} → ${toAcc?.name||"?"}` : `${t.category} · ${mem?.emoji}${mem?.name}${t.cardId ? ` · 💳 ${cardLabel(cards.find(c=>String(c.id)===String(t.cardId))||{name:"카드"}, members)}` : t.accountId?` · 💳 ${allAccounts.find(a=>String(a.id)===String(t.accountId))?.name||""}`:""}${t.isCardSettle?" · 카드 정산":""}`}
                       </div>
+                      {balanceAfterMap[t.id]!==undefined && (
+                        <div style={{fontSize:11,color:balanceAfterMap[t.id]<0?"#E07A5F":"#4A6FA5",marginTop:2}}>
+                          🏦 {(isTransfer ? (t.isTransferIn ? toAcc : fromAcc) : allAccounts.find(a=>String(a.id)===String(t.accountId)))?.name||""} 잔액 {balanceAfterMap[t.id].toLocaleString()}원
+                        </div>
+                      )}
                     </div>
                     <div style={{fontSize:14,fontWeight:700,color:isTransfer?"#4A6FA5":t.type==="income"?"#3BB273":"#E07A5F",whiteSpace:"nowrap",marginRight:5}}>
                       {isTransfer?(selectedAccountId?`${t.isTransferIn?"+":"-"}${fmtShort(t.amount)}`:`↔ ${fmtShort(t.amount)}`):t.type==="income"?`+${fmtShort(t.amount)}`:`-${fmtShort(t.amount)}`}
