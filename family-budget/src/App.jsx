@@ -991,6 +991,7 @@ export default function App() {
   // 거래 직후 통장 잔액: 현재 잔액에서 최신 거래부터 거꾸로 되돌려 계산
   const balanceAfterMap = useMemo(()=>{
     const map = {};
+    const opening = {};
     assetCats.forEach(c=>c.accounts.forEach(a=>{
       let bal = a.amount;
       const list = transactions.filter(t=>t.accountId && String(t.accountId)===String(a.id))
@@ -1000,7 +1001,9 @@ export default function App() {
         const eff = t.isTransfer ? (t.isTransferIn ? t.amount : -t.amount) : (t.type==="income" ? t.amount : -t.amount);
         bal -= eff;
       });
+      opening[String(a.id)] = bal; // 가장 오래된 내역 이전의 잔액(초기 설정·직접 수정분)
     }));
+    map.__opening = opening;
     return map;
   }, [transactions, assetCats]);
 
@@ -1918,6 +1921,34 @@ export default function App() {
                     <div style={{fontSize:15,fontWeight:700,color:selAcc.amount<0?"#E07A5F":"#333"}}>{selAcc.amount.toLocaleString()}원</div>
                   </div>
                 )}
+                {selAcc && (
+                  <div className="card" style={{padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div style={{fontSize:12,color:"#888"}}>첫 내역 이전 잔액 (초기 설정·직접 수정분)</div>
+                    <div style={{fontSize:13,fontWeight:700,color:"#666"}}>{(balanceAfterMap.__opening?.[String(selAcc.id)]||0).toLocaleString()}원</div>
+                  </div>
+                )}
+                {selAcc && (() => {
+                  const sid = String(selAcc.id);
+                  const snaps = [...accountHistory].filter(h=>h[sid]!==undefined).sort((x,y)=>(x.date||"").localeCompare(y.date||""));
+                  return (
+                    <details className="card" style={{padding:"10px 16px"}}>
+                      <summary style={{fontSize:12,color:"#4A6FA5",fontWeight:600,cursor:"pointer"}}>📈 이 통장 잔액 기록 보기 ({snaps.length}건)</summary>
+                      <div style={{marginTop:8,fontSize:12}}>
+                        {snaps.length===0 && <div style={{color:"#aaa"}}>기록이 없어요</div>}
+                        {snaps.map((h,i)=>{
+                          const diff = i===0 ? null : h[sid]-snaps[i-1][sid];
+                          return (
+                            <div key={h.date} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #F5F0E8"}}>
+                              <span style={{color:"#888"}}>{h.date}</span>
+                              <span style={{fontWeight:600}}>{(h[sid]||0).toLocaleString()}원</span>
+                              <span style={{width:110,textAlign:"right",color:diff==null?"#bbb":diff>0?"#3BB273":diff<0?"#E07A5F":"#bbb"}}>{diff==null?"첫 기록":(diff>0?"+":"")+diff.toLocaleString()}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </details>
+                  );
+                })()}
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
                   <div className="card" style={{padding:"12px 13px",textAlign:"center"}}>
                     <div style={{fontSize:11,color:"#aaa",marginBottom:4}}>💚 수입</div>
