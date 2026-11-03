@@ -5,6 +5,7 @@ import { doc, getDoc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 
 const EXPENSE_CATEGORIES = {
   식비:       { emoji: "🍱", color: "#E07A5F" },
+  생필품:     { emoji: "🧻", color: "#E9C46A" },
   장보기:     { emoji: "🛒", color: "#FF9F1C" },
   "카페·디저트": { emoji: "☕", color: "#A0785A" },
   건강:       { emoji: "💊", color: "#81B29A" },
@@ -588,6 +589,182 @@ function ReconView({ assetCats, transactions, baseline, members, now, onSaveBase
   );
 }
 
+function CardSettleView({ cards, members, transactions, cardMonthlyBalances, cardBalances, showSettled, setShowSettled, showUnsettled, setShowUnsettled, setShowSettleModal, setSettleAccountId, now }) {
+  const [cardMonthOffset, setCardMonthOffset] = useState(0);
+  const selDate = new Date(now.getFullYear(), now.getMonth() + cardMonthOffset, 1);
+  const selMonth = `${selDate.getFullYear()}-${String(selDate.getMonth()+1).padStart(2,"0")}`;
+  const selMonthLabel = `${selDate.getFullYear()}년 ${selDate.getMonth()+1}월`;
+  const isCurrent = cardMonthOffset === 0;
+
+  const memberIds = [...new Set(cards.map(c => c.memberId || 9999))];
+
+  const memberRows = memberIds.map(mid => {
+    const mem = members.find(m => m.id === mid);
+    const memberCards = cards.filter(c => (c.memberId || 9999) === mid);
+
+    // 미정산 행 (현재 미정산 — 이번 달 기준)
+    const unsettledRows = [];
+    if (isCurrent) {
+      memberCards.forEach(card => {
+        const monthly = cardMonthlyBalances[String(card.id)] || {};
+        Object.entries(monthly).sort(([a],[b])=>a.localeCompare(b)).forEach(([mon, amt]) => {
+          unsettledRows.push({ card, mon, amt });
+        });
+      });
+    }
+
+    // 선택 월 정산완료 행
+    const settledRows = [];
+    memberCards.forEach(card => {
+      transactions
+        .filter(t => t.isCardSettle && String(t.cardId) === String(card.id) && (t.settleMonth || t.date.slice(0,7)) === selMonth)
+        .forEach(t => {
+          settledRows.push({ card, mon: t.settleMonth || t.date.slice(0,7), amt: t.amount });
+        });
+    });
+
+    const totalBal = memberCards.reduce((s,c) => s + (cardBalances[String(c.id)] || 0), 0);
+    const totalSettled = settledRows.reduce((s,r) => s + r.amt, 0);
+    return { mem, memberCards, unsettledRows, settledRows, totalBal, totalSettled };
+  }).filter(r => r.unsettledRows.length > 0 || r.settledRows.length > 0);
+
+  return (
+    <div className="card" style={{padding:0,overflow:"hidden"}}>
+      {/* 헤더 + 월 네비게이션 */}
+      <div style={{padding:"14px 18px 10px",borderBottom:"1px solid #F5F0E8"}}>
+        <div style={{fontSize:14,fontWeight:700,marginBottom:10}}>💳 카드 내역</div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <button onClick={()=>setCardMonthOffset(o=>o-1)} style={{background:"#F0EBE0",border:"none",borderRadius:8,padding:"5px 12px",fontSize:15,cursor:"pointer",color:"#555"}}>‹</button>
+          <span style={{fontSize:13,fontWeight:600,color:"#2A2A2A"}}>
+            {selMonthLabel} {isCurrent && <span style={{fontSize:11,color:"#4A6FA5",fontWeight:400}}>이번 달</span>}
+          </span>
+          <button onClick={()=>setCardMonthOffset(o=>Math.min(0,o+1))} disabled={isCurrent}
+            style={{background:isCurrent?"#F5F0E8":"#F0EBE0",border:"none",borderRadius:8,padding:"5px 12px",fontSize:15,cursor:isCurrent?"default":"pointer",color:isCurrent?"#ccc":"#555"}}>›</button>
+        </div>
+      </div>
+
+      {memberRows.length === 0 && (
+        <div style={{padding:"20px 18px",fontSize:12,color:"#bbb",textAlign:"center"}}>이 달 카드 내역 없음</div>
+      )}
+
+      {memberRows.map(({ mem, unsettledRows, settledRows, totalBal, totalSettled }, i) => {
+        const uid = mem?.id || i;
+        return (
+          <div key={uid} style={{borderBottom:"1px solid #F5F0E8"}}>
+            {/* 멤버 헤더 */}
+            <div style={{display:"flex",alignItems:"center",gap:12,padding:"13px 18px"}}>
+              <div style={{width:38,height:38,borderRadius:11,background:"#FFF0EE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>
+                {mem?.emoji || "👤"}
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:14,fontWeight:600}}>{mem?.name || "미지정"}</div>
+                <div style={{fontSize:11,color:"#bbb",marginTop:2}}>
+                  {isCurrent && <span>{unsettledRows.length}건 미정산</span>}
+                  {settledRows.length > 0 && <span style={{color:"#3BB273",marginLeft:isCurrent?6:0}}>✓ 정산완료 {settledRows.length}건</span>}
+                </div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                {isCurrent && <div style={{fontSize:15,fontWeight:700,color:totalBal>0?"#E07A5F":"#aaa"}}>{fmtShort(totalBal)}</div>}
+                {totalSettled > 0 && <div style={{fontSize:11,color:"#3BB273",marginTop:2}}>✓ {fmtShort(totalSettled)}</div>}
+              </div>
+            </div>
+
+            {/* 미정산 행 (이번 달만) */}
+            {isCurrent && unsettledRows.map(({ card, mon, amt }) => {
+              const [y, m] = mon.split("-");
+              const monLabel = `${parseInt(y)}년 ${parseInt(m)}월`;
+              const detailKey = `${card.id}-${mon}`;
+              const isOpen = showUnsettled[detailKey];
+              const detailTxs = transactions.filter(t =>
+                String(t.cardId) === String(card.id) && t.date.startsWith(mon) &&
+                !t.isCardSettle && !(card.excludedMemberIds?.includes(t.member))
+              ).sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
+              return (
+                <div key={detailKey}>
+                  <div onClick={()=>setShowUnsettled(p=>({...p,[detailKey]:!isOpen}))}
+                    style={{display:"flex",alignItems:"center",gap:10,padding:"9px 18px 9px 60px",background:"#FAFAF7",cursor:"pointer"}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,color:"#555",fontWeight:500}}>{card.name}</div>
+                      <div style={{fontSize:11,color:"#bbb"}}>{monLabel} · {detailTxs.length}건 {isOpen?"▲":"▼"}</div>
+                    </div>
+                    <span style={{fontSize:13,fontWeight:600,color:"#E07A5F"}}>{fmt(amt)}</span>
+                    <button onClick={e=>{e.stopPropagation();setShowSettleModal({card,month:mon});setSettleAccountId("");}}
+                      style={{background:"#E07A5F",border:"none",borderRadius:8,padding:"6px 12px",color:"white",fontSize:12,fontWeight:600,cursor:"pointer",flexShrink:0}}>정산</button>
+                  </div>
+                  {isOpen && (
+                    <div style={{background:"#F8F4EF",borderLeft:"3px solid #E07A5F",marginLeft:60}}>
+                      {detailTxs.length === 0 ? <div style={{padding:"8px 14px",fontSize:11,color:"#bbb"}}>내역 없음</div>
+                      : detailTxs.map(t => {
+                        const mem = members.find(m=>m.id===t.member);
+                        return (
+                          <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 14px",borderBottom:"1px solid #F0EBE0"}}>
+                            <span style={{fontSize:13}}>{CATEGORIES[t.category]?.emoji||"📦"}</span>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:12,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.memo}</div>
+                              <div style={{fontSize:10,color:"#bbb"}}>{t.date} · {mem?.emoji}{mem?.name}</div>
+                            </div>
+                            <span style={{fontSize:12,fontWeight:600,color:"#E07A5F",whiteSpace:"nowrap"}}>{fmt(t.amount)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* 정산완료 행 */}
+            {settledRows.map(({ card, mon, amt }) => {
+              const [y, m] = mon.split("-");
+              const monLabel = `${parseInt(y)}년 ${parseInt(m)}월`;
+              const settleKey = `settled-${card.id}-${mon}`;
+              const isOpen = showUnsettled[settleKey];
+              const settledTxs = transactions.filter(t =>
+                String(t.cardId) === String(card.id) && t.date.startsWith(mon) &&
+                !t.isCardSettle && !(card.excludedMemberIds?.includes(t.member))
+              ).sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
+              return (
+                <div key={settleKey}>
+                  <div onClick={()=>setShowUnsettled(p=>({...p,[settleKey]:!isOpen}))}
+                    style={{display:"flex",alignItems:"center",gap:10,padding:"9px 18px 9px 60px",background:"#F6FBF7",cursor:"pointer"}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,color:"#3BB273",fontWeight:500}}>{card.name}</div>
+                      <div style={{fontSize:11,color:"#bbb"}}>{monLabel} · {settledTxs.length}건 {isOpen?"▲":"▼"}</div>
+                    </div>
+                    <span style={{fontSize:13,fontWeight:600,color:"#3BB273"}}>✓ {fmt(amt)}</span>
+                  </div>
+                  {isOpen && (
+                    <div style={{background:"#F0FAF4",borderLeft:"3px solid #3BB273",marginLeft:60}}>
+                      {settledTxs.length === 0 ? <div style={{padding:"8px 14px",fontSize:11,color:"#bbb"}}>내역 없음</div>
+                      : settledTxs.map(t => {
+                        const mem = members.find(m=>m.id===t.member);
+                        return (
+                          <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 14px",borderBottom:"1px solid #E8F5EE"}}>
+                            <span style={{fontSize:13}}>{CATEGORIES[t.category]?.emoji||"📦"}</span>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:12,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.memo}</div>
+                              <div style={{fontSize:10,color:"#bbb"}}>{t.date} · {mem?.emoji}{mem?.name}</div>
+                            </div>
+                            <span style={{fontSize:12,fontWeight:600,color:"#E07A5F",whiteSpace:"nowrap"}}>{fmt(t.amount)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {isCurrent && unsettledRows.length === 0 && settledRows.length === 0 && (
+              <div style={{padding:"8px 18px 12px 60px",fontSize:12,color:"#bbb"}}>미정산 내역 없음</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function App() {
   const [setup, setSetup] = useState(null);
   const [tab, setTab] = useState("dashboard");
@@ -602,6 +779,7 @@ export default function App() {
   const [selectedMember, setSelectedMember] = useState(null);
   const [txMonthOffset, setTxMonthOffset] = useState(0);
   const [txSearch, setTxSearch] = useState("");
+  const [selectedAccountId, setSelectedAccountId] = useState("");
   const [selectedAnalysisCat, setSelectedAnalysisCat] = useState(null);
   const [analysisMonthOffset, setAnalysisMonthOffset] = useState(0);
   const [expandedCat, setExpandedCat] = useState({});
@@ -805,9 +983,10 @@ export default function App() {
     return [...transactions]
       .filter(t => t.date.startsWith(selMonth))
       .filter(t => !selectedMember || t.member === selectedMember)
+      .filter(t => !selectedAccountId || String(t.accountId) === String(selectedAccountId))
       .filter(t => !txSearch.trim() || t.memo?.includes(txSearch.trim()) || t.category?.includes(txSearch.trim()))
       .sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
-  }, [transactions, selectedMember, txMonthOffset, txSearch]);
+  }, [transactions, selectedMember, selectedAccountId, txMonthOffset, txSearch]);
 
   const buildSnapshot = (newCats, prevSetup, removeDateEntry = null) => {
     const todayStr = now.toISOString().slice(0,10);
@@ -1501,169 +1680,7 @@ export default function App() {
               );
             })}
 
-            {cards.length > 0 && (()=>{
-              // 멤버별로 카드 묶기
-              const memberIds = [...new Set(cards.map(c => c.memberId || 9999))];
-              const memberCardRows = memberIds.map(mid => {
-                const mem = members.find(m => m.id === mid);
-                const memberCards = cards.filter(c => (c.memberId || 9999) === mid);
-                // 미정산 행
-                const rows = [];
-                memberCards.forEach(card => {
-                  const monthly = cardMonthlyBalances[String(card.id)] || {};
-                  Object.entries(monthly).sort(([a],[b])=>a.localeCompare(b)).forEach(([mon, amt]) => {
-                    rows.push({ card, mon, amt });
-                  });
-                });
-                rows.sort((a,b) => a.mon.localeCompare(b.mon) || a.card.name.localeCompare(b.card.name));
-                const totalBal = memberCards.reduce((s,c) => s + (cardBalances[String(c.id)] || 0), 0);
-                // 이번 달 정산 완료 금액 (카드별 합산)
-                const settledRows = [];
-                memberCards.forEach(card => {
-                  transactions
-                    .filter(t => t.isCardSettle && String(t.cardId) === String(card.id) && t.date.startsWith(thisMonth))
-                    .forEach(t => {
-                      const mon = t.settleMonth || t.date.slice(0,7);
-                      settledRows.push({ card, mon, amt: t.amount });
-                    });
-                });
-                settledRows.sort((a,b) => a.mon.localeCompare(b.mon));
-                const totalSettled = settledRows.reduce((s,r) => s + r.amt, 0);
-                return { mem, memberCards, rows, totalBal, settledRows, totalSettled };
-              });
-
-              return (
-                <div className="card" style={{padding:0,overflow:"hidden"}}>
-                  <div style={{padding:"14px 18px 10px",borderBottom:"1px solid #F5F0E8"}}>
-                    <div style={{fontSize:14,fontWeight:700}}>💳 카드 미정산 잔액</div>
-                  </div>
-                  {memberCardRows.map(({ mem, rows, totalBal, settledRows, totalSettled }, i) => {
-                    const uid = mem?.id || i;
-                    return (
-                    <div key={uid} style={{borderBottom:"1px solid #F5F0E8"}}>
-                      {/* 멤버 헤더 */}
-                      <div style={{display:"flex",alignItems:"center",gap:12,padding:"13px 18px"}}>
-                        <div style={{width:38,height:38,borderRadius:11,background:"#FFF0EE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>
-                          {mem?.emoji || "👤"}
-                        </div>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:14,fontWeight:600}}>{mem?.name || "미지정"}</div>
-                          <div style={{fontSize:11,color:"#bbb",marginTop:2}}>{rows.length}건 미정산{totalSettled > 0 && <span style={{color:"#3BB273",marginLeft:6}}>· 이번 달 {fmt(totalSettled)} 정산완료</span>}</div>
-                        </div>
-                        <div style={{textAlign:"right"}}>
-                          <div style={{fontSize:15,fontWeight:700,color:totalBal>0?"#E07A5F":"#aaa"}}>{fmtShort(totalBal)}</div>
-                          {totalSettled > 0 && <div style={{fontSize:11,color:"#3BB273",marginTop:2}}>✓ {fmtShort(totalSettled)}</div>}
-                        </div>
-                      </div>
-                      {/* 미정산 행 — 클릭하면 해당 월 내역 펼침 */}
-                      {rows.map(({ card, mon, amt }) => {
-                        const [y, m] = mon.split("-");
-                        const monLabel = `${parseInt(y)}년 ${parseInt(m)}월`;
-                        const detailKey = `${card.id}-${mon}`;
-                        const isOpen = showUnsettled[detailKey];
-                        // 해당 카드+월 거래 내역
-                        const detailTxs = transactions.filter(t =>
-                          String(t.cardId) === String(card.id) &&
-                          t.date.startsWith(mon) &&
-                          !t.isCardSettle &&
-                          !(card.excludedMemberIds?.includes(t.member))
-                        ).sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
-                        return (
-                          <div key={detailKey}>
-                            <div onClick={()=>setShowUnsettled(p=>({...p,[detailKey]:!isOpen}))}
-                              style={{display:"flex",alignItems:"center",gap:10,padding:"9px 18px 9px 60px",background:"#FAFAF7",cursor:"pointer"}}>
-                              <div style={{flex:1,minWidth:0}}>
-                                <div style={{fontSize:12,color:"#555",fontWeight:500}}>{card.name}</div>
-                                <div style={{fontSize:11,color:"#bbb"}}>{monLabel} · {detailTxs.length}건 {isOpen?"▲":"▼"}</div>
-                              </div>
-                              <span style={{fontSize:13,fontWeight:600,color:"#E07A5F"}}>{fmt(amt)}</span>
-                              <button onClick={e=>{e.stopPropagation();setShowSettleModal({card, month:mon});setSettleAccountId("");}}
-                                style={{background:"#E07A5F",border:"none",borderRadius:8,padding:"6px 12px",color:"white",fontSize:12,fontWeight:600,cursor:"pointer",flexShrink:0}}>정산</button>
-                            </div>
-                            {/* 내역 목록 */}
-                            {isOpen && (
-                              <div style={{background:"#F8F4EF",borderLeft:"3px solid #E07A5F",marginLeft:60}}>
-                                {detailTxs.length === 0 ? (
-                                  <div style={{padding:"8px 14px",fontSize:11,color:"#bbb"}}>내역 없음</div>
-                                ) : detailTxs.map(t => {
-                                  const mem = members.find(m=>m.id===t.member);
-                                  return (
-                                    <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 14px",borderBottom:"1px solid #F0EBE0"}}>
-                                      <span style={{fontSize:13}}>{CATEGORIES[t.category]?.emoji||"📦"}</span>
-                                      <div style={{flex:1,minWidth:0}}>
-                                        <div style={{fontSize:12,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.memo}</div>
-                                        <div style={{fontSize:10,color:"#bbb"}}>{t.date} · {mem?.emoji}{mem?.name}</div>
-                                      </div>
-                                      <span style={{fontSize:12,fontWeight:600,color:"#E07A5F",whiteSpace:"nowrap"}}>{fmt(t.amount)}</span>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                      {/* 정산 완료 — 접기/펼치기 */}
-                      {settledRows.length > 0 && (
-                        <>
-                          <button onClick={()=>setShowSettled(p=>({...p,[uid]:!p[uid]}))}
-                            style={{display:"flex",alignItems:"center",gap:6,padding:"8px 18px 8px 60px",background:"none",border:"none",cursor:"pointer",width:"100%",textAlign:"left",fontFamily:"inherit"}}>
-                            <span style={{fontSize:11,color:"#3BB273",fontWeight:600}}>✓ 정산완료 {settledRows.length}건 ({fmt(totalSettled)})</span>
-                            <span style={{fontSize:10,color:"#bbb",marginLeft:"auto"}}>{showSettled[uid]?"▲ 접기":"▼ 펼치기"}</span>
-                          </button>
-                          {showSettled[uid] && settledRows.map(({ card, mon, amt }, si) => {
-                            const [y, m] = mon.split("-");
-                            const monLabel = `${parseInt(y)}년 ${parseInt(m)}월`;
-                            const settleKey = `settled-${card.id}-${mon}`;
-                            const isOpen = showUnsettled[settleKey];
-                            // 해당 카드+월 원래 지출 내역
-                            const settledTxs = transactions.filter(t =>
-                              String(t.cardId) === String(card.id) &&
-                              t.date.startsWith(mon) &&
-                              !t.isCardSettle &&
-                              !(card.excludedMemberIds?.includes(t.member))
-                            ).sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
-                            return (
-                              <div key={settleKey}>
-                                <div onClick={()=>setShowUnsettled(p=>({...p,[settleKey]:!isOpen}))}
-                                  style={{display:"flex",alignItems:"center",gap:10,padding:"7px 18px 7px 60px",background:"#F6FBF7",cursor:"pointer"}}>
-                                  <div style={{flex:1,minWidth:0}}>
-                                    <div style={{fontSize:12,color:"#3BB273",fontWeight:500}}>{card.name}</div>
-                                    <div style={{fontSize:11,color:"#bbb"}}>{monLabel} · {settledTxs.length}건 {isOpen?"▲":"▼"}</div>
-                                  </div>
-                                  <span style={{fontSize:13,fontWeight:600,color:"#3BB273"}}>✓ {fmt(amt)}</span>
-                                </div>
-                                {isOpen && (
-                                  <div style={{background:"#F0FAF4",borderLeft:"3px solid #3BB273",marginLeft:60}}>
-                                    {settledTxs.length === 0 ? (
-                                      <div style={{padding:"8px 14px",fontSize:11,color:"#bbb"}}>내역 없음</div>
-                                    ) : settledTxs.map(t => {
-                                      const mem = members.find(m=>m.id===t.member);
-                                      return (
-                                        <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 14px",borderBottom:"1px solid #E8F5EE"}}>
-                                          <span style={{fontSize:13}}>{CATEGORIES[t.category]?.emoji||"📦"}</span>
-                                          <div style={{flex:1,minWidth:0}}>
-                                            <div style={{fontSize:12,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.memo}</div>
-                                            <div style={{fontSize:10,color:"#bbb"}}>{t.date} · {mem?.emoji}{mem?.name}</div>
-                                          </div>
-                                          <span style={{fontSize:12,fontWeight:600,color:"#E07A5F",whiteSpace:"nowrap"}}>{fmt(t.amount)}</span>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </>
-                      )}
-                      {rows.length === 0 && settledRows.length === 0 && <div style={{padding:"8px 18px 12px 60px",fontSize:12,color:"#bbb"}}>미정산 내역 없음</div>}
-                    </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
+            {cards.length > 0 && <CardSettleView cards={cards} members={members} transactions={transactions} cardMonthlyBalances={cardMonthlyBalances} cardBalances={cardBalances} showSettled={showSettled} setShowSettled={setShowSettled} showUnsettled={showUnsettled} setShowUnsettled={setShowUnsettled} setShowSettleModal={setShowSettleModal} setSettleAccountId={setSettleAccountId} now={now}/>}
 
             {(assetHistory.length>0 || accountHistory.length>0) && assetCats.length>0 && (()=>{
               const allAccounts = assetCats.flatMap(c=>c.accounts.map(a=>({...a,catLabel:c.label,catColor:c.color,catId:c.id})));
@@ -1830,6 +1847,12 @@ export default function App() {
                   style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"#bbb",fontSize:16,cursor:"pointer",lineHeight:1}}>✕</button>
               )}
             </div>
+            <select className="sel" value={selectedAccountId} onChange={e=>setSelectedAccountId(e.target.value)}>
+              <option value="">🏦 전체 통장</option>
+              {assetCats.flatMap(c=>c.accounts.map(a=>(
+                <option key={a.id} value={String(a.id)}>{c.emoji} {c.label} › {a.name}</option>
+              )))}
+            </select>
             <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
               <button onClick={()=>setSelectedMember(null)} className="chip" style={{border:`1.5px solid ${!selectedMember?"#4A6FA5":"#E5E0D5"}`,background:!selectedMember?"#EEF2F9":"white",color:!selectedMember?"#4A6FA5":"#666"}}>전체</button>
               {members.map((m,i)=>(
@@ -1841,10 +1864,23 @@ export default function App() {
             </div>
             {(() => {
               const visibleTx = filteredTx.filter(t => !t.isTransfer || !t.isTransferIn);
-              const sumIncome  = visibleTx.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
-              const sumExpense = visibleTx.filter(t=>t.type==="expense"&&!t.isCardSettle).reduce((s,t)=>s+t.amount,0);
+              let sumIncome  = visibleTx.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
+              let sumExpense = visibleTx.filter(t=>t.type==="expense"&&!t.isCardSettle).reduce((s,t)=>s+t.amount,0);
+              if (selectedAccountId) {
+                // 통장 기준: 들어온 돈 / 나간 돈 (이체·카드정산 포함)
+                sumIncome  = filteredTx.filter(t=>t.isTransfer ? t.isTransferIn : t.type==="income").reduce((s,t)=>s+t.amount,0);
+                sumExpense = filteredTx.filter(t=>t.isTransfer ? !t.isTransferIn : t.type==="expense").reduce((s,t)=>s+t.amount,0);
+              }
               const sumBalance = sumIncome - sumExpense;
+              const selAcc = selectedAccountId ? assetCats.flatMap(c=>c.accounts).find(a=>String(a.id)===String(selectedAccountId)) : null;
               return (
+                <>
+                {selAcc && (
+                  <div className="card" style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",background:"#EEF2F9"}}>
+                    <div style={{fontSize:13,fontWeight:600,color:"#4A6FA5"}}>🏦 {selAcc.name} 현재 잔액</div>
+                    <div style={{fontSize:15,fontWeight:700,color:selAcc.amount<0?"#E07A5F":"#333"}}>{selAcc.amount.toLocaleString()}원</div>
+                  </div>
+                )}
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
                   <div className="card" style={{padding:"12px 13px",textAlign:"center"}}>
                     <div style={{fontSize:11,color:"#aaa",marginBottom:4}}>💚 수입</div>
@@ -1859,6 +1895,7 @@ export default function App() {
                     <div style={{fontSize:14,fontWeight:700,color:sumBalance>=0?"#3BB273":"#E07A5F"}}>{sumBalance>=0?"+":""}{fmtShort(sumBalance)}</div>
                   </div>
                 </div>
+                </>
               );
             })()}
             <div className="card" style={{padding:0,overflow:"hidden"}}>
@@ -1871,10 +1908,10 @@ export default function App() {
                 const cat=CATEGORIES[t.category];
                 const mem=members.find(m=>m.id===t.member);
                 const allAccounts = assetCats.flatMap(c=>c.accounts);
-                if (t.isTransfer && t.isTransferIn) return null;
+                if (t.isTransfer && t.isTransferIn && !selectedAccountId) return null;
                 const isTransfer = t.isTransfer;
-                const fromAcc = isTransfer ? allAccounts.find(a=>String(a.id)===String(t.accountId)) : null;
-                const toAcc   = isTransfer ? allAccounts.find(a=>String(a.id)===String(t.toAccountId)) : null;
+                const fromAcc = isTransfer ? allAccounts.find(a=>String(a.id)===String(t.isTransferIn ? t.fromAccountId : t.accountId)) : null;
+                const toAcc   = isTransfer ? allAccounts.find(a=>String(a.id)===String(t.isTransferIn ? t.accountId : t.toAccountId)) : null;
                 return (
                   <div key={t.id} className="tx-row">
                     <div style={{width:37,height:37,borderRadius:11,background:isTransfer?"#EEF2F9":cat?.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:19}}>
@@ -1887,7 +1924,7 @@ export default function App() {
                       </div>
                     </div>
                     <div style={{fontSize:14,fontWeight:700,color:isTransfer?"#4A6FA5":t.type==="income"?"#3BB273":"#E07A5F",whiteSpace:"nowrap",marginRight:5}}>
-                      {isTransfer?`↔ ${fmtShort(t.amount)}`:t.type==="income"?`+${fmtShort(t.amount)}`:`-${fmtShort(t.amount)}`}
+                      {isTransfer?(selectedAccountId?`${t.isTransferIn?"+":"-"}${fmtShort(t.amount)}`:`↔ ${fmtShort(t.amount)}`):t.type==="income"?`+${fmtShort(t.amount)}`:`-${fmtShort(t.amount)}`}
                     </div>
                     <button onClick={()=>{setEditTxId(t.id);setTxForm({...t,amount:String(t.amount),member:String(t.member),cardId:t.cardId||"",accountId:t.accountId||""});setShowTxModal(true);}} style={{background:"none",border:"none",color:"#ccc",fontSize:13,cursor:"pointer",padding:4}}>✏️</button>
                     <button onClick={()=>deleteTx(t)} style={{background:"none",border:"none",color:"#ddd",fontSize:13,cursor:"pointer",padding:4}}>✕</button>
