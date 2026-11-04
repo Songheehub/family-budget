@@ -780,6 +780,7 @@ export default function App() {
   const [txMonthOffset, setTxMonthOffset] = useState(0);
   const [txSearch, setTxSearch] = useState("");
   const [selectedAccountId, setSelectedAccountId] = useState("");
+  const [selectedCardId, setSelectedCardId] = useState("");
   const [selectedAnalysisCat, setSelectedAnalysisCat] = useState(null);
   const [analysisMonthOffset, setAnalysisMonthOffset] = useState(0);
   const [expandedCat, setExpandedCat] = useState({});
@@ -984,9 +985,10 @@ export default function App() {
       .filter(t => t.date.startsWith(selMonth))
       .filter(t => !selectedMember || t.member === selectedMember)
       .filter(t => !selectedAccountId || String(t.accountId) === String(selectedAccountId))
+      .filter(t => !selectedCardId || String(t.cardId) === String(selectedCardId))
       .filter(t => !txSearch.trim() || t.memo?.includes(txSearch.trim()) || t.category?.includes(txSearch.trim()))
       .sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
-  }, [transactions, selectedMember, selectedAccountId, txMonthOffset, txSearch]);
+  }, [transactions, selectedMember, selectedAccountId, selectedCardId, txMonthOffset, txSearch]);
 
   // 거래 직후 통장 잔액: 현재 잔액에서 최신 거래부터 거꾸로 되돌려 계산
   const balanceAfterMap = useMemo(()=>{
@@ -1887,12 +1889,18 @@ export default function App() {
                   style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"#bbb",fontSize:16,cursor:"pointer",lineHeight:1}}>✕</button>
               )}
             </div>
-            <select className="sel" value={selectedAccountId} onChange={e=>setSelectedAccountId(e.target.value)}>
+            <select className="sel" value={selectedAccountId} onChange={e=>{setSelectedAccountId(e.target.value); if(e.target.value) setSelectedCardId("");}}>
               <option value="">🏦 전체 통장</option>
               {assetCats.flatMap(c=>c.accounts.map(a=>(
                 <option key={a.id} value={String(a.id)}>{c.emoji} {c.label} › {a.name}</option>
               )))}
             </select>
+            {cards.length>0 && (
+              <select className="sel" value={selectedCardId} onChange={e=>{setSelectedCardId(e.target.value); if(e.target.value) setSelectedAccountId("");}}>
+                <option value="">💳 전체 카드</option>
+                {cards.map(c=><option key={c.id} value={String(c.id)}>{cardLabel(c, members)}</option>)}
+              </select>
+            )}
             <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
               <button onClick={()=>setSelectedMember(null)} className="chip" style={{border:`1.5px solid ${!selectedMember?"#4A6FA5":"#E5E0D5"}`,background:!selectedMember?"#EEF2F9":"white",color:!selectedMember?"#4A6FA5":"#666"}}>전체</button>
               {members.map((m,i)=>(
@@ -1927,28 +1935,6 @@ export default function App() {
                     <div style={{fontSize:13,fontWeight:700,color:"#666"}}>{(balanceAfterMap.__opening?.[String(selAcc.id)]||0).toLocaleString()}원</div>
                   </div>
                 )}
-                {selAcc && (() => {
-                  const sid = String(selAcc.id);
-                  const snaps = [...accountHistory].filter(h=>h[sid]!==undefined).sort((x,y)=>(x.date||"").localeCompare(y.date||""));
-                  return (
-                    <details className="card" style={{padding:"10px 16px"}}>
-                      <summary style={{fontSize:12,color:"#4A6FA5",fontWeight:600,cursor:"pointer"}}>📈 이 통장 잔액 기록 보기 ({snaps.length}건)</summary>
-                      <div style={{marginTop:8,fontSize:12}}>
-                        {snaps.length===0 && <div style={{color:"#aaa"}}>기록이 없어요</div>}
-                        {snaps.map((h,i)=>{
-                          const diff = i===0 ? null : h[sid]-snaps[i-1][sid];
-                          return (
-                            <div key={h.date} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #F5F0E8"}}>
-                              <span style={{color:"#888"}}>{h.date}</span>
-                              <span style={{fontWeight:600}}>{(h[sid]||0).toLocaleString()}원</span>
-                              <span style={{width:110,textAlign:"right",color:diff==null?"#bbb":diff>0?"#3BB273":diff<0?"#E07A5F":"#bbb"}}>{diff==null?"첫 기록":(diff>0?"+":"")+diff.toLocaleString()}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </details>
-                  );
-                })()}
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
                   <div className="card" style={{padding:"12px 13px",textAlign:"center"}}>
                     <div style={{fontSize:11,color:"#aaa",marginBottom:4}}>💚 수입</div>
