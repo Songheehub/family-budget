@@ -267,7 +267,20 @@ function CardAddForm({ members, onAdd }) {
   );
 }
 
-function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaultMemberId, onSave, onClose }) {
+// 기기 시간 기준 오늘 날짜 (YYYY-MM-DD)
+const localDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+
+// 엑셀(.xls/.xlsx) 읽기 도구: 처음 필요할 때만 불러옴
+const loadXLSX = () => new Promise((resolve, reject) => {
+  if (window.XLSX) return resolve(window.XLSX);
+  const sc = document.createElement("script");
+  sc.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+  sc.onload = () => window.XLSX ? resolve(window.XLSX) : reject(new Error("엑셀 읽기 도구를 불러오지 못했어요"));
+  sc.onerror = () => reject(new Error("엑셀 읽기 도구를 불러오지 못했어요. 인터넷 연결을 확인해주세요"));
+  document.head.appendChild(sc);
+});
+
+function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaultMemberId, memos = [], onSave, onClose }) {
   const [step, setStep] = useState("input");
   const [cardId, setCardId] = useState(defaultCardId || String(cards[0]?.id||""));
   const [memberId, setMemberId] = useState(defaultMemberId || String(members[0]?.id||""));
@@ -278,7 +291,35 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
   const [inputMode, setInputMode] = useState("text");
   const fileRef = useRef();
 
-  const EXPENSE_CATEGORIES = ["식비","장보기","카페·디저트","건강","교통","통신","공과금","교육","문화","쇼핑","여행","용돈","주거","기타"];
+  const EXPENSE_CATEGORIES = ["식비","생필품","장보기","카페·디저트","건강","교통","통신","공과금","교육","문화","쇼핑","여행","용돈","주거","구독료","기타"];
+
+  // 결제 메모를 카드 결제 건에 연결: 시간이 있으면 가장 가까운 메모, 날짜만 있으면 그날 메모·결제가 하나씩일 때만
+  const memoTime = (ts) => { const d = new Date(ts); return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; };
+  const withMemo = (it, m) => m ? { ...it, _memoId: m.id, memo: `${m.text} (${it._orig})` } : { ...it, _memoId: "", memo: it._orig };
+  const matchMemos = (items) => {
+    if (!memos.length) return items;
+    const out = items.map(it => ({ ...it }));
+    const used = new Set(), taken = new Set(), pairs = [];
+    out.forEach((it, i) => {
+      if (!it._time) return;
+      const its = new Date(`${it.date}T${it._time}:00`).getTime();
+      memos.forEach(m => {
+        const diff = Math.abs(m.ts - its);
+        if (localDate(new Date(m.ts)) === it.date || diff <= 3*3600000) pairs.push({ i, m, diff });
+      });
+    });
+    pairs.sort((a, b) => a.diff - b.diff).forEach(pr => {
+      if (taken.has(pr.i) || used.has(pr.m.id)) return;
+      taken.add(pr.i); used.add(pr.m.id); out[pr.i] = withMemo(out[pr.i], pr.m);
+    });
+    const byDate = {};
+    out.forEach((it, i) => { if (!it._time && !it._memoId) (byDate[it.date] = byDate[it.date] || []).push(i); });
+    Object.entries(byDate).forEach(([d, idxs]) => {
+      const ms = memos.filter(m => !used.has(m.id) && localDate(new Date(m.ts)) === d);
+      if (idxs.length === 1 && ms.length === 1) { out[idxs[0]] = withMemo(out[idxs[0]], ms[0]); used.add(ms[0].id); }
+    });
+    return out;
+  };
 
   const splitCSVLine = (line) => {
     const cols = [];
@@ -306,6 +347,7 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
     const amtCol  = headers.findIndex(h => /이용금액|승인금액|거래금액|결제금액|금액/.test(h));
     const memoCol = headers.findIndex(h => /가맹점|이용가맹점|상호|이용처|내용|거래처|업종명/.test(h));
     if (dateCol === -1 || amtCol === -1) return [];
+    const timeCol = headers.findIndex((h, hi) => hi !== dateCol && /시간|시각/.test(h));
     const results = [];
     for (let i = headerIdx + 1; i < lines.length; i++) {
       const cols = splitCSVLine(lines[i]).map(c => c.replace(/"/g,"").trim());
@@ -320,6 +362,10 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
       else if (dm)  date = `${dm[1]}-${dm[2].padStart(2,"0")}-${dm[3].padStart(2,"0")}`;
       else if (dm3) date = `${dm3[1]}-${dm3[2]}-${dm3[3]}`;
       else if (dm2) date = `20${dm2[1]}-${dm2[2]}-${dm2[3]}`;
+      let time = null;
+      const tRaw = timeCol !== -1 ? (cols[timeCol] || "") : "";
+      const tm = dateRaw.match(/(\d{1,2}):(\d{2})/) || tRaw.match(/(\d{1,2}):(\d{2})/) || tRaw.match(/^(\d{2})(\d{2})(\d{2})?$/);
+      if (tm) { const t = `${tm[1].padStart(2,"0")}:${tm[2]}`; if (t !== "00:00") time = t; }
       const amtRaw = cols[amtCol] || "0";
       const amt = parseInt(amtRaw.replace(/[^0-9]/g,"")) || 0;
       if (amt <= 0) continue;
@@ -341,7 +387,7 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
         if (/넷플릭스|유튜브프리미엄|애플뮤직|스포티파이|왓챠|웨이브|티빙|시즌|쿠팡플레이|디즈니|구독|멤버십|클라우드|iCloud|ChatGPT|chat\.openai|microsoft 365|어도비|Adobe/.test(n)) return "구독료";
         return "기타";
       })();
-      results.push({ date, amount: amt, memo, category, _id: i, enabled: true });
+      results.push({ date, amount: amt, memo, _orig: memo, _time: time, category, _id: i, enabled: true });
     }
     return results;
   };
@@ -352,17 +398,30 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
     setParsing(true); setParseError("");
     try {
       const buf = await file.arrayBuffer();
-      let text = "";
-      try {
-        text = new TextDecoder("euc-kr").decode(buf);
-        if (text.includes("\uFFFD")) text = new TextDecoder("utf-8").decode(buf);
-      } catch { text = new TextDecoder("utf-8").decode(buf); }
-      const items = parseCSV(text);
+      let items = [];
+      const isExcel = /\.xlsx?$/i.test(file.name);
+      if (isExcel) {
+        const XLSX = await loadXLSX();
+        const wb = XLSX.read(buf, { type: "array", cellDates: true, dateNF: "yyyy-mm-dd hh:mm" });
+        for (const name of wb.SheetNames) {
+          items = parseCSV(XLSX.utils.sheet_to_csv(wb.Sheets[name], { dateNF: "yyyy-mm-dd hh:mm" }));
+          if (items.length) break;
+        }
+      } else {
+        let text = "";
+        try {
+          text = new TextDecoder("euc-kr").decode(buf);
+          if (text.includes("\uFFFD")) text = new TextDecoder("utf-8").decode(buf);
+        } catch { text = new TextDecoder("utf-8").decode(buf); }
+        items = parseCSV(text);
+      }
       if (items.length === 0) {
-        setParseError("내역을 찾지 못했어요. 파일 형식을 확인해주세요.");
+        setParseError(isExcel
+          ? "엑셀에서 내역을 찾지 못했어요. 이용일(날짜)과 이용금액 열 제목이 있는지 확인해주세요. 비밀번호가 걸린 파일은 비밀번호를 해제한 뒤 올려주세요."
+          : "내역을 찾지 못했어요. 파일 형식을 확인해주세요.");
         setParsing(false); return;
       }
-      setParsed(items);
+      setParsed(matchMemos(items));
       setStep("confirm");
     } catch(err) {
       setParseError(`파일 읽기 오류: ${err.message}`);
@@ -381,7 +440,7 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
       cardId: cardId,
       accountId: "",
     }));
-    onSave(txs, cardId, memberId);
+    onSave(txs, cardId, memberId, parsed.filter(p=>p.enabled && p._memoId).map(p=>p._memoId));
   };
 
   return (
@@ -406,7 +465,7 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
             </div>
           </div>
           <div className="tt" style={{marginBottom:12}}>
-            <button className={`tb ${inputMode==="csv"?"on":""}`} onClick={()=>setInputMode("csv")} style={{color:inputMode==="csv"?"#4A6FA5":"#999",fontSize:12}}>📁 CSV 파일</button>
+            <button className={`tb ${inputMode==="csv"?"on":""}`} onClick={()=>setInputMode("csv")} style={{color:inputMode==="csv"?"#4A6FA5":"#999",fontSize:12}}>📁 엑셀·CSV 파일</button>
             <button className={`tb ${inputMode==="text"?"on":""}`} onClick={()=>setInputMode("text")} style={{color:inputMode==="text"?"#4A6FA5":"#999",fontSize:12}}>📋 텍스트 붙여넣기</button>
           </div>
           {inputMode==="csv" ? (
@@ -415,9 +474,9 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
               <button onClick={()=>fileRef.current.click()}
                 style={{width:"100%",padding:"32px 20px",background:"#FAFAF7",border:"2px dashed #C8BFB0",borderRadius:16,cursor:"pointer",fontFamily:"inherit",display:"flex",flexDirection:"column",alignItems:"center",gap:10}}>
                 <span style={{fontSize:36}}>📁</span>
-                <span style={{fontSize:14,fontWeight:600,color:"#555"}}>CSV 파일 선택</span>
+                <span style={{fontSize:14,fontWeight:600,color:"#555"}}>엑셀·CSV 파일 선택</span>
                 <span style={{fontSize:11,color:"#aaa",textAlign:"center",lineHeight:1.8}}>
-                  엑셀 → 다른이름저장 → <b style={{color:"#4A6FA5"}}>CSV (쉼표로 분리)</b> 로 저장 후 업로드<br/>
+                  카드사에서 받은 <b style={{color:"#4A6FA5"}}>엑셀(.xls·.xlsx)</b> 또는 CSV 파일을 그대로 올리세요<br/>
                   신한·현대·삼성·국민·하나·롯데·BC 카드 모두 지원
                 </span>
               </button>
@@ -439,7 +498,7 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
                 if (!rawText.trim()) return;
                 const items = parseCSV(rawText);
                 if (items.length === 0) { setParseError("내역을 찾지 못했어요. 날짜·금액·가맹점 컬럼이 있는 CSV 형식인지 확인해주세요."); return; }
-                setParsed(items); setStep("confirm");
+                setParsed(matchMemos(items)); setStep("confirm");
               }} disabled={!rawText.trim()}>파싱하기</button>
             </div>
           )}
@@ -448,6 +507,12 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
           )}
         </>) : (<>
           <div style={{fontSize:13,fontWeight:600,marginBottom:10,color:"#555"}}>파싱된 내역 확인 <span style={{color:"#4A6FA5"}}>{parsed.filter(p=>p.enabled).length}건 선택됨</span></div>
+          {memos.length>0 && (
+            <div style={{fontSize:11,color:"#aaa",marginBottom:10,lineHeight:1.6}}>
+              📝 결제 메모 {parsed.filter(p=>p._memoId).length}개를 날짜·시간이 가까운 결제에 붙였어요. 틀리면 줄마다 바꿀 수 있어요.
+              {!parsed.some(p=>p._time) && " 이 파일에는 결제 시간이 없어서, 같은 날 메모와 결제가 하나씩일 때만 자동으로 붙였어요."}
+            </div>
+          )}
           <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
             {parsed.map((p,i)=>(
               <div key={p._id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:p.enabled?"#FAFAF7":"#f5f5f5",borderRadius:12,border:`1.5px solid ${p.enabled?"#E5E0D5":"#eee"}`,opacity:p.enabled?1:0.5}}>
@@ -472,6 +537,21 @@ function BulkCardModal({ cards, members, assetCats, today, defaultCardId, defaul
                       {members.filter(m=>m.id!==9999).map(m=><option key={m.id} value={m.id}>{m.emoji} {m.name}</option>)}
                     </select>
                   </div>
+                  {(() => {
+                    const day = new Date(p.date).getTime();
+                    const cands = memos.filter(m => Math.abs(new Date(localDate(new Date(m.ts))).getTime() - day) <= 86400000);
+                    if (!cands.length) return null;
+                    return (
+                      <select value={p._memoId || ""} onChange={e=>{
+                          const m = memos.find(x=>String(x.id)===e.target.value);
+                          setParsed(prev=>prev.map((x,j)=>j===i?withMemo(x, m):x));
+                        }}
+                        style={{fontSize:11,border:"1px solid #E5E0D5",borderRadius:7,padding:"3px 6px",background:p._memoId?"#EEF2F9":"white",fontFamily:"inherit",marginTop:6,width:"100%"}}>
+                        <option value="">📝 메모 연결 안 함</option>
+                        {cands.map(m=><option key={m.id} value={m.id}>📝 {memoTime(m.ts)} · {m.text}</option>)}
+                      </select>
+                    );
+                  })()}
                 </div>
               </div>
             ))}
@@ -776,6 +856,8 @@ export default function App() {
   const [showSettleModal, setShowSettleModal] = useState(null);
   const [settleAccountId, setSettleAccountId] = useState("");
   const [showBulkCardModal, setShowBulkCardModal] = useState(false);
+  const [showQuickModal, setShowQuickModal] = useState(false);
+  const [memoText, setMemoText] = useState("");
   const [selectedMember, setSelectedMember] = useState(null);
   const [txMonthOffset, setTxMonthOffset] = useState(0);
   const [txSearch, setTxSearch] = useState("");
@@ -902,6 +984,22 @@ export default function App() {
     if (loading || isRemoteUpdate.current) return;
     fbSet("recurring", recurringItems).catch(() => {});
   }, [recurringItems, loading]);
+
+  // 결제 메모: 글만 적으면 지금 날짜·시간으로 저장. 카드내역 일괄 입력 때 가까운 결제에 붙임
+  const openQuick = () => { setMemoText(""); setShowQuickModal(true); };
+  const saveMemo = () => {
+    const text = memoText.trim();
+    if (!text) return;
+    const ts = Date.now();
+    setSetup(s => ({ ...s, quickMemos: [...(s.quickMemos || []), { id: ts, ts, text }] }));
+    setShowQuickModal(false);
+  };
+  // 주소 끝에 ?quick=1 을 붙여 열면 바로 메모 창이 뜸 (홈 화면 바로가기용)
+  useEffect(() => {
+    if (loading || !setup) return;
+    try { if (new URLSearchParams(window.location.search).get("quick") === "1") openQuick(); } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   const members      = setup?.members      || [];
   const assetCats    = setup?.assetCats    || [];
@@ -1449,6 +1547,7 @@ export default function App() {
             {saving ? <span style={{fontSize:11,color:"#aaa"}}>저장 중…</span> : lastSaved && <span style={{fontSize:11,color:"#bbb"}}>✓ 저장됨</span>}
             <button style={{background:"#F0EBE0",border:"none",borderRadius:10,padding:"8px 11px",fontSize:15,cursor:"pointer"}} onClick={()=>setShowSettingsModal(true)}>⚙️</button>
             <button className="btn-g" style={{padding:"8px 13px",fontSize:13}} onClick={()=>setShowTransferModal(true)}>🔄 이체</button>
+            <button className="btn-g" style={{padding:"8px 11px",fontSize:13}} onClick={openQuick}>⚡ 메모</button>
             {cards.length>0 && <button className="btn-g" style={{padding:"8px 13px",fontSize:13}} onClick={()=>setShowBulkCardModal(true)}>💳 일괄</button>}
             <button className="btn-b" style={{padding:"8px 15px"}} onClick={()=>{
               setEditTxId(null);
@@ -2195,6 +2294,38 @@ export default function App() {
         })()}
       </div>
 
+      {showQuickModal && (
+        <div className="overlay">
+          <div className="sheet" style={{height:"auto",maxHeight:"92vh"}}>
+            <div style={{width:36,height:4,background:"#E5E0D5",borderRadius:4,margin:"0 auto 20px"}}/>
+            <div style={{fontSize:17,fontWeight:700,marginBottom:4}}>⚡ 결제 메모</div>
+            <div style={{fontSize:12,color:"#aaa",marginBottom:14,lineHeight:1.6}}>무엇을 샀는지만 적으세요. 지금 날짜·시간으로 저장되고, 나중에 카드내역을 일괄로 올리면 가까운 결제에 붙여줘요.</div>
+            <input className="inp" autoFocus placeholder="예: 아이 운동화" value={memoText} maxLength={60}
+              onChange={e=>setMemoText(e.target.value)} onKeyDown={e=>{ if (e.key==="Enter") saveMemo(); }} style={{marginBottom:14}}/>
+            <div style={{display:"flex",gap:10,marginBottom:(setup?.quickMemos||[]).length?18:0}}>
+              <button className="btn-g" style={{flex:1}} onClick={()=>setShowQuickModal(false)}>닫기</button>
+              <button className="btn-b" style={{flex:2}} onClick={saveMemo} disabled={!memoText.trim()}>저장</button>
+            </div>
+            {(setup?.quickMemos||[]).length>0 && (
+              <div>
+                <div style={{fontSize:12,color:"#aaa",marginBottom:6}}>아직 카드내역에 붙이지 않은 메모 {(setup.quickMemos||[]).length}개</div>
+                {[...(setup.quickMemos||[])].sort((a,b)=>b.ts-a.ts).map(m=>{
+                  const d = new Date(m.ts);
+                  return (
+                    <div key={m.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 2px",borderBottom:"1px solid #F5F0E8"}}>
+                      <span style={{fontSize:11,color:"#aaa",flexShrink:0,width:78}}>{d.getMonth()+1}/{d.getDate()} {String(d.getHours()).padStart(2,"0")}:{String(d.getMinutes()).padStart(2,"0")}</span>
+                      <span style={{fontSize:13,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.text}</span>
+                      <button onClick={()=>setSetup(s=>({...s, quickMemos:(s.quickMemos||[]).filter(x=>x.id!==m.id)}))}
+                        style={{background:"none",border:"none",color:"#ccc",fontSize:13,cursor:"pointer",padding:4}}>✕</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {showTxModal && (
         <div className="overlay">
           <div className="sheet">
@@ -2260,7 +2391,10 @@ export default function App() {
 
       {showBulkCardModal && <BulkCardModal cards={cards} members={members} assetCats={assetCats}
         today={now.toISOString().slice(0,10)} defaultCardId={lastCardId} defaultMemberId={lastCardMemberId}
-        onSave={(txs, cardId, memberId)=>{setTransactions(prev=>[...prev, ...txs]);setLastCardId(cardId);setLastCardMemberId(memberId);setShowBulkCardModal(false);}}
+        memos={setup?.quickMemos||[]}
+        onSave={(txs, cardId, memberId, usedMemoIds)=>{setTransactions(prev=>[...prev, ...txs]);setLastCardId(cardId);setLastCardMemberId(memberId);
+          if (usedMemoIds && usedMemoIds.length) setSetup(s=>({...s, quickMemos:(s.quickMemos||[]).filter(m=>!usedMemoIds.includes(m.id))}));
+          setShowBulkCardModal(false);}}
         onClose={()=>setShowBulkCardModal(false)}/>}
 
       {showSettleModal && (
