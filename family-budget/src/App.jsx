@@ -217,8 +217,13 @@ function AssetEditModal({ assetCats: initCats, onSave, onClose }) {
                 {cat.accounts.map((acc,ai)=>(
                   <div key={acc.id} style={{display:"flex",gap:7,alignItems:"center"}}>
                     <OB up={()=>moveAcc(cat.id,ai,-1)} down={()=>moveAcc(cat.id,ai,1)} du={ai===0} dd={ai===cat.accounts.length-1}/>
-                    <input className="inp" style={{flex:1,opacity:acc.excluded?0.45:1}} placeholder="통장명" value={acc.name} onChange={e=>updAcc(cat.id,acc.id,"name",e.target.value)}/>
-                    <input className="inp" style={{flex:1,opacity:acc.excluded?0.45:1}} placeholder="잔액" type="number" value={acc.amount||""} onChange={e=>updAcc(cat.id,acc.id,"amount",e.target.value)}/>
+                    <input className="inp" style={{flex:1,minWidth:0,opacity:(acc.excluded||acc.archived)?0.45:1}} placeholder="통장명" value={acc.name} onChange={e=>updAcc(cat.id,acc.id,"name",e.target.value)}/>
+                    <input className="inp" style={{flex:1,minWidth:0,opacity:(acc.excluded||acc.archived)?0.45:1}} placeholder="잔액" type="number" value={acc.amount||""} onChange={e=>updAcc(cat.id,acc.id,"amount",e.target.value)}/>
+                    <button onClick={()=>updAcc(cat.id,acc.id,"archived",!acc.archived)}
+                      title={acc.archived?"보관 중: 선택 목록과 자산 탭에서 숨겨져요":"안 쓰는 통장이면 보관하세요"}
+                      style={{background:acc.archived?"#FFF4E0":"#F5F0E8",border:"none",borderRadius:7,padding:"5px 7px",fontSize:12,cursor:"pointer",flexShrink:0,color:acc.archived?"#C98A00":"#aaa"}}>
+                      {acc.archived?"보관중":"보관"}
+                    </button>
                     <button onClick={()=>updAcc(cat.id,acc.id,"excluded",!acc.excluded)}
                       title={acc.excluded?"자산 합계에서 제외됨":"자산 합계에 포함됨"}
                       style={{background:acc.excluded?"#F0EBE0":"#E8F5EE",border:"none",borderRadius:7,padding:"5px 7px",fontSize:12,cursor:"pointer",flexShrink:0,color:acc.excluded?"#bbb":"#3BB273"}}>
@@ -1520,6 +1525,11 @@ export default function App() {
     }
   };
 
+  // 보관한 통장은 선택 목록에서 숨김. 이미 선택돼 있는 통장(예전 내역 수정 등)은 그대로 보여줌
+  const showAcc = (acc) => !acc.archived ||
+    [txForm?.accountId, settleAccountId, rForm?.accountId, rForm?.toAccountId, transferForm?.fromId, transferForm?.toId]
+      .some(v => v !== undefined && v !== null && v !== "" && String(v) === String(acc.id));
+
   if (loading) return (
     <div style={{minHeight:"100vh",background:"#F5F0E8",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,fontFamily:"'Noto Sans KR',sans-serif"}}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap');@keyframes spin{to{transform:rotate(360deg)}}`}</style>
@@ -1793,7 +1803,7 @@ export default function App() {
                     <div style={{width:38,height:38,borderRadius:12,background:cat.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{cat.emoji}</div>
                     <div style={{flex:1}}>
                       <div style={{fontSize:14,fontWeight:600}}>{cat.label}</div>
-                      <div style={{fontSize:11,color:"#aaa",marginTop:2}}>{cat.accounts.length}개 계좌</div>
+                      <div style={{fontSize:11,color:"#aaa",marginTop:2}}>{cat.accounts.filter(a=>!a.archived).length}개 계좌{cat.accounts.some(a=>a.archived)?` · 보관 ${cat.accounts.filter(a=>a.archived).length}개`:""}</div>
                     </div>
                     <div style={{textAlign:"right"}}>
                       <div style={{fontSize:16,fontWeight:700,color:cat.color}}>{fmtShort(catTotalIncluded(cat))}</div>
@@ -1803,7 +1813,7 @@ export default function App() {
                   </div>
                   {expanded && (
                     <div style={{padding:"8px 13px 13px",display:"flex",flexDirection:"column",gap:7}}>
-                      {cat.accounts.map(acc=>(
+                      {cat.accounts.filter(a=>!a.archived).map(acc=>(
                         <div key={acc.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 13px",background:acc.excluded?"#F5F5F5":acc.amount<0?"#FFF5F5":"#FAFAF7",borderRadius:10,opacity:acc.excluded?0.5:1}}>
                           <div style={{display:"flex",alignItems:"center",gap:9}}>
                             <div style={{width:7,height:7,borderRadius:2,background:acc.excluded?"#ccc":acc.amount<0?"#E07A5F":cat.color,flexShrink:0}}/>
@@ -1814,6 +1824,9 @@ export default function App() {
                           <span style={{fontSize:14,fontWeight:700,color:acc.excluded?"#bbb":acc.amount<0?"#E07A5F":"#2A2A2A"}}>{fmt(acc.amount)}</span>
                         </div>
                       ))}
+                      {cat.accounts.some(a=>a.archived) && (
+                        <div style={{fontSize:11,color:"#bbb",padding:"2px 4px"}}>📦 보관한 통장 {cat.accounts.filter(a=>a.archived).length}개 · 수정하기에서 다시 꺼낼 수 있어요</div>
+                      )}
                       <button onClick={()=>setShowAssetModal(true)} style={{background:"none",border:`1.5px dashed ${cat.color}88`,borderRadius:9,padding:"7px",color:cat.color,fontSize:12,cursor:"pointer",width:"100%",fontFamily:"inherit",marginTop:2}}>✏️ 수정하기</button>
                     </div>
                   )}
@@ -2367,7 +2380,7 @@ export default function App() {
               ) : (
                 <select className="sel" value={txForm.accountId} onChange={e=>setTxForm({...txForm,accountId:e.target.value})}>
                   <option value="">연결 안 함</option>
-                  {assetCats.map(cat=>cat.accounts.map(acc=>(
+                  {assetCats.map(cat=>cat.accounts.filter(showAcc).map(acc=>(
                     <option key={acc.id} value={acc.id}>{cat.emoji} {cat.label} › {acc.name} ({fmtShort(acc.amount)})</option>
                   )))}
                 </select>
@@ -2412,7 +2425,7 @@ export default function App() {
               <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:6}}>출금 통장 선택</label>
               <select className="sel" value={settleAccountId} onChange={e=>setSettleAccountId(e.target.value)}>
                 <option value="">통장을 선택하세요</option>
-                {assetCats.map(cat=>cat.accounts.map(acc=>(
+                {assetCats.map(cat=>cat.accounts.filter(showAcc).map(acc=>(
                   <option key={acc.id} value={acc.id}>{cat.emoji} {cat.label} › {acc.name} ({fmtShort(acc.amount)})</option>
                 )))}
               </select>
@@ -2483,7 +2496,7 @@ export default function App() {
                   <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>💸 출금 통장</label>
                   <select className="sel" value={rForm.accountId} onChange={e=>setRForm({...rForm,accountId:e.target.value})}>
                     <option value="">선택</option>
-                    {assetCats.map(cat=>cat.accounts.map(acc=>(<option key={acc.id} value={acc.id}>{cat.emoji} {cat.label} › {acc.name}</option>)))}
+                    {assetCats.map(cat=>cat.accounts.filter(showAcc).map(acc=>(<option key={acc.id} value={acc.id}>{cat.emoji} {cat.label} › {acc.name}</option>)))}
                   </select>
                 </div>
               </>) : isTransfer ? (<>
@@ -2491,7 +2504,7 @@ export default function App() {
                   <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>💸 출금 통장</label>
                   <select className="sel" value={rForm.accountId} onChange={e=>setRForm({...rForm,accountId:e.target.value})}>
                     <option value="">선택</option>
-                    {assetCats.map(cat=>cat.accounts.map(acc=>(<option key={acc.id} value={acc.id}>{cat.emoji} {cat.label} › {acc.name}</option>)))}
+                    {assetCats.map(cat=>cat.accounts.filter(showAcc).map(acc=>(<option key={acc.id} value={acc.id}>{cat.emoji} {cat.label} › {acc.name}</option>)))}
                   </select>
                 </div>
                 <div style={{textAlign:"center",fontSize:18,margin:"2px 0"}}>↓</div>
@@ -2499,7 +2512,7 @@ export default function App() {
                   <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>💰 입금 통장</label>
                   <select className="sel" value={rForm.toAccountId} onChange={e=>setRForm({...rForm,toAccountId:e.target.value})}>
                     <option value="">선택</option>
-                    {assetCats.map(cat=>cat.accounts.map(acc=>(<option key={acc.id} value={acc.id} disabled={String(acc.id)===String(rForm.accountId)}>{cat.emoji} {cat.label} › {acc.name}</option>)))}
+                    {assetCats.map(cat=>cat.accounts.filter(showAcc).map(acc=>(<option key={acc.id} value={acc.id} disabled={String(acc.id)===String(rForm.accountId)}>{cat.emoji} {cat.label} › {acc.name}</option>)))}
                   </select>
                 </div>
               </>) : (<>
@@ -2518,7 +2531,7 @@ export default function App() {
                   <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>💳 연결 통장 (선택)</label>
                   <select className="sel" value={rForm.accountId} onChange={e=>setRForm({...rForm,accountId:e.target.value})}>
                     <option value="">연결 안 함</option>
-                    {assetCats.map(cat=>cat.accounts.map(acc=>(<option key={acc.id} value={acc.id}>{cat.emoji} {cat.label} › {acc.name}</option>)))}
+                    {assetCats.map(cat=>cat.accounts.filter(showAcc).map(acc=>(<option key={acc.id} value={acc.id}>{cat.emoji} {cat.label} › {acc.name}</option>)))}
                   </select>
                 </div>
               </>)}
@@ -2546,7 +2559,7 @@ export default function App() {
               <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>💸 출금 통장</label>
               <select className="sel" value={transferForm.fromId} onChange={e=>setTransferForm({...transferForm,fromId:e.target.value})}>
                 <option value="">선택</option>
-                {assetCats.map(cat=>cat.accounts.map(acc=>(<option key={acc.id} value={acc.id}>{cat.emoji} {cat.label} › {acc.name} ({fmtShort(acc.amount)})</option>)))}
+                {assetCats.map(cat=>cat.accounts.filter(showAcc).map(acc=>(<option key={acc.id} value={acc.id}>{cat.emoji} {cat.label} › {acc.name} ({fmtShort(acc.amount)})</option>)))}
               </select>
             </div>
             <div style={{textAlign:"center",fontSize:20,margin:"4px 0"}}>↓</div>
@@ -2554,7 +2567,7 @@ export default function App() {
               <label style={{fontSize:12,color:"#aaa",display:"block",marginBottom:4}}>💰 입금 통장</label>
               <select className="sel" value={transferForm.toId} onChange={e=>setTransferForm({...transferForm,toId:e.target.value})}>
                 <option value="">선택</option>
-                {assetCats.map(cat=>cat.accounts.map(acc=>(<option key={acc.id} value={acc.id} disabled={String(acc.id)===String(transferForm.fromId)}>{cat.emoji} {cat.label} › {acc.name} ({fmtShort(acc.amount)})</option>)))}
+                {assetCats.map(cat=>cat.accounts.filter(showAcc).map(acc=>(<option key={acc.id} value={acc.id} disabled={String(acc.id)===String(transferForm.fromId)}>{cat.emoji} {cat.label} › {acc.name} ({fmtShort(acc.amount)})</option>)))}
               </select>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:11}}>
